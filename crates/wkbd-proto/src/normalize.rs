@@ -128,6 +128,44 @@ impl Normalizer {
         out
     }
 
+    /// Records a permission request.
+    ///
+    /// Permission prompts arrive as their own JSON-RPC request rather than as a
+    /// `session/update`, but they belong in the transcript at the position where they
+    /// interrupted: the user needs to see what the agent was doing when it asked. Routing
+    /// them through the normalizer is what keeps that ordering, and settling the open
+    /// segment first keeps a half-written thought from appearing to still be streaming
+    /// while the UI waits on a human.
+    pub fn note_permission_request(
+        &mut self,
+        request_id: impl Into<String>,
+        tool_call_id: Option<String>,
+        title: impl Into<String>,
+        options: Vec<PermissionOption>,
+    ) -> Vec<EventPayload> {
+        let mut out = self.settle_open();
+        out.push(EventPayload::PermissionRequested {
+            request_id: request_id.into(),
+            tool_call_id,
+            title: title.into(),
+            options,
+        });
+        out
+    }
+
+    pub fn note_permission_resolved(
+        &mut self,
+        request_id: impl Into<String>,
+        option_id: Option<String>,
+        auto: bool,
+    ) -> Vec<EventPayload> {
+        vec![EventPayload::PermissionResolved {
+            request_id: request_id.into(),
+            option_id,
+            auto,
+        }]
+    }
+
     pub fn push(&mut self, update: RawUpdate) -> Vec<EventPayload> {
         match update {
             RawUpdate::TextChunk { kind, message_id, text } => {

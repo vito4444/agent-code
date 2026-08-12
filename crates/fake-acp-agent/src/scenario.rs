@@ -1,0 +1,327 @@
+//! Scripted agent behaviours.
+//!
+//! Every scenario here exists because it is something a naive test double does *not* do.
+//! A double that emits one thought, one tool call and one answer per turn will pass a
+//! broken segmenter, a broken permission flow and a broken context-usage widget without
+//! complaint. These scenarios are the counterexamples.
+
+use serde_json::{json, Value};
+
+/// One scripted step. `Emit` sends a `session/update` notification; the others model
+/// things a real agent does that are easy to forget.
+#[derive(Debug, Clone)]
+pub enum Step {
+    /// Send a `session/update` with this `update` object, verbatim.
+    Emit(Value),
+    /// Ask the client for permission and wait for the answer before continuing.
+    AskPermission { tool_call_id: String, title: String },
+    /// Pause, so cancellation and queueing have a window to happen in.
+    Sleep(u64),
+    /// Terminate the process mid-turn without answering the prompt.
+    Die,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profile {
+    /// Everything the protocol allows: messageId on every chunk, several thoughts per
+    /// turn, a diff, a terminal, a permission request, config options, usage reporting.
+    Rich,
+    /// The realistic floor: no messageId, no configOptions, no usage_update. This is the
+    /// profile most ACP agents actually match today, so it must be the one the UI is
+    /// most confident in.
+    Spartan,
+    /// Returns to an earlier messageId after a tool call, exercising upsert semantics.
+    Resume,
+    /// Opens a tool call and then stalls, so the client can cancel it.
+    Stall,
+    /// Emits a `sessionUpdate` discriminant that does not exist in the schema, plus a
+    /// chunk whose content shape we do not model. Neither may crash the client.
+    Alien,
+    /// High-rate chunk flood, for backpressure and UI batching.
+    Flood,
+    /// Exits mid-turn, leaving the prompt request unanswered.
+    Crash,
+}
+
+impl std::str::FromStr for Profile {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "rich" => Profile::Rich,
+            "spartan" => Profile::Spartan,
+            "resume" => Profile::Resume,
+            "stall" => Profile::Stall,
+            "alien" => Profile::Alien,
+            "flood" => Profile::Flood,
+            "crash" => Profile::Crash,
+            other => return Err(format!("unknown profile: {other}")),
+        })
+    }
+}
+
+impl Profile {
+    /// Capabilities announced at `initialize`.
+    pub fn agent_capabilities(self) -> Value {
+        match self {
+            Profile::Spartan => json!({ "loadSession": false }),
+            _ => json!({
+                "loadSession": true,
+                "promptCapabilities": { "image": true, "audio": false, "embeddedContext": true }
+            }),
+        }
+    }
+
+    /// Config options returned from `session/new`.
+    ///
+    /// Spartan returns none at all, which is the case the UI has to handle by drawing no
+    /// model selector rather than an empty one.
+    pub fn config_options(self) -> Option<Value> {
+        match self {
+            Profile::Spartan | Profile::Crash => None,
+            _ => Some(json!([
+                {
+                    "id": "model",
+                    "name": "Model",
+                    "category": "model",
+                    "type": "select",
+                    "currentValue": "fake-fast",
+                    "options": [
+                        { "value": "fake-fast", "name": "Fake Fast", "description": "The quick one" },
+                        { "value": "fake-deep", "name": "Fake Deep", "description": "The slow one" }
+                    ]
+                },
+                {
+                    "id": "thought_level",
+                    "name": "Thinking",
+                    "category": "thought_level",
+                    "type": "select",
+                    "currentValue": "medium",
+                    "options": [
+                        { "value": "low", "name": "Low" },
+                        { "value": "medium", "name": "Medium" },
+                        { "value": "high", "name": "High" }
+                    ]
+                },
+                {
+                    // No category at all. The UI must still render this as a plain
+                    // toggle rather than dropping it or guessing what it means.
+                    "id": "verbose",
+                    "name": "Verbose logging",
+                    "type": "boolean",
+                    "currentValue": false
+                },
+                {
+                    // A vendor-private category. Unknown categories must degrade, and
+                    // the `_` prefix is explicitly reserved for custom use by the spec.
+                    "id": "_vendor_mode",
+                    "name": "Vendor mode",
+                    "category": "_vendor_private",
+                    "type": "select",
+                    "currentValue": "a",
+                    "options": [{ "value": "a", "name": "A" }, { "value": "b", "name": "B" }]
+                }
+            ])),
+        }
+    }
+
+    pub fn script(self, prompt: &str) -> Vec<Step> {
+        match self {
+            Profile::Rich => rich(prompt),
+            Profile::Spartan => spartan(prompt),
+            Profile::Resume => resume(),
+            Profile::Stall => stall(),
+            Profile::Alien => alien(),
+            Profile::Flood => flood(),
+            Profile::Crash => vec![
+                Step::Emit(thought(Some("m1"), "starting something I will not finish")),
+                Step::Sleep(30),
+                Step::Die,
+            ],
+        }
+    }
+}
+
+pub fn thought(message_id: Option<&str>, text: &str) -> Value {
+    let mut v = json!({
+        "sessionUpdate": "agent_thought_chunk",
+        "content": { "type": "text", "text": text }
+    });
+    if let Some(m) = message_id {
+        v["messageId"] = json!(m);
+    }
+    v
+}
+
+pub fn message(message_id: Option<&str>, text: &str) -> Value {
+    let mut v = json!({
+        "sessionUpdate": "agent_message_chunk",
+        "content": { "type": "text", "text": text }
+    });
+    if let Some(m) = message_id {
+        v["messageId"] = json!(m);
+    }
+    v
+}
+
+fn tool_call(id: &str, title: &str, kind: &str, status: &str) -> Value {
+    json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": id,
+        "title": title,
+        "kind": kind,
+        "status": status
+    })
+}
+
+fn tool_done_with_diff(id: &str, path: &str, old: Option<&str>, new: &str) -> Value {
+    let mut diff = json!({ "type": "diff", "path": path, "newText": new });
+    if let Some(o) = old {
+        diff["oldText"] = json!(o);
+    }
+    json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": id,
+        "status": "completed",
+        "content": [diff],
+        "locations": [{ "path": path, "line": 12 }]
+    })
+}
+
+fn usage(used: u64, size: u64) -> Value {
+    json!({
+        "sessionUpdate": "usage_update",
+        "used": used,
+        "size": size,
+        "cost": { "amount": 0.0123, "currency": "USD" }
+    })
+}
+
+/// The scenario the whole layered-chat design exists for: several thoughts in one turn,
+/// separated by tool calls, with the answer last.
+fn rich(prompt: &str) -> Vec<Step> {
+    vec![
+        Step::Emit(json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                { "content": "Find the loader", "priority": "high", "status": "in_progress" },
+                { "content": "Fix the ordering", "priority": "medium", "status": "pending" }
+            ]
+        })),
+        Step::Emit(thought(Some("m1"), "The prompt mentions ")),
+        Step::Emit(thought(Some("m1"), "config loading, so I should start at the loader.")),
+        Step::Emit(usage(12_000, 200_000)),
+        Step::Emit(tool_call("t1", "Read src/config.rs", "read", "in_progress")),
+        Step::Emit(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t1",
+            "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text",
+                "text": "pub fn load() -> Config {\n    parse(read_file(PATH))\n}" } }]
+        })),
+        // Second thought in the same turn. A naive implementation expands this one *and*
+        // the first, which is the bug this whole scenario exists to catch.
+        Step::Emit(thought(Some("m2"), "It reads the file twice. I need to see the caller.")),
+        Step::Emit(tool_call("t2", "Run cargo test", "execute", "in_progress")),
+        Step::Emit(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "t2",
+            "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text",
+                "text": "running 3 tests\ntest config::loads ... FAILED\n\nfailures:\n    config::loads" } }]
+        })),
+        // Third thought, then a permission request before the write.
+        Step::Emit(thought(Some("m3"), "Confirmed. I will cache the parse result.")),
+        Step::Emit(tool_call("t3", "Edit src/config.rs", "edit", "pending")),
+        Step::AskPermission { tool_call_id: "t3".into(), title: "Edit src/config.rs".into() },
+        Step::Emit(tool_done_with_diff(
+            "t3",
+            "/repo/src/config.rs",
+            Some("pub fn load() -> Config {\n    parse(read_file(PATH))\n}"),
+            "static CACHE: OnceLock<Config> = OnceLock::new();\n\npub fn load() -> &'static Config {\n    CACHE.get_or_init(|| parse(read_file(PATH)))\n}",
+        )),
+        Step::Emit(usage(53_000, 200_000)),
+        Step::Emit(message(Some("m4"), "The loader parsed the file on every call. ")),
+        Step::Emit(message(Some("m4"), &format!("I cached it behind a OnceLock. (prompt was: {prompt})"))),
+    ]
+}
+
+/// No messageId anywhere, no usage, no config options. Segmentation has to come entirely
+/// from interleaving boundaries.
+fn spartan(prompt: &str) -> Vec<Step> {
+    vec![
+        Step::Emit(thought(None, "no message ids here, ")),
+        Step::Emit(thought(None, "so the client has to infer boundaries")),
+        Step::Emit(tool_call("s1", "Search for TODO", "search", "in_progress")),
+        Step::Emit(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "s1",
+            "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "3 matches" } }]
+        })),
+        Step::Emit(thought(None, "second thought, must not merge with the first")),
+        Step::Emit(message(None, &format!("Found 3 TODOs. You asked: {prompt}"))),
+    ]
+}
+
+fn resume() -> Vec<Step> {
+    vec![
+        Step::Emit(thought(Some("m1"), "beginning a thought, ")),
+        Step::Emit(tool_call("r1", "Read file", "read", "in_progress")),
+        Step::Emit(json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "r1", "status": "completed"
+        })),
+        // Same messageId again: this is one thought interrupted, not two thoughts.
+        Step::Emit(thought(Some("m1"), "and now finishing the same thought.")),
+        Step::Emit(message(Some("m2"), "done")),
+    ]
+}
+
+fn stall() -> Vec<Step> {
+    vec![
+        Step::Emit(thought(Some("m1"), "about to start something long")),
+        Step::Emit(tool_call("long1", "Run the full suite", "execute", "in_progress")),
+        Step::Sleep(600),
+        Step::Emit(message(Some("m2"), "never reached under cancellation")),
+    ]
+}
+
+/// Things the schema does not describe. The client must record them and carry on.
+fn alien() -> Vec<Step> {
+    vec![
+        Step::Emit(thought(Some("m1"), "ordinary thought first")),
+        Step::Emit(json!({
+            "sessionUpdate": "quantum_entanglement_update",
+            "spookiness": 11,
+            "note": "this discriminant does not exist in any ACP version"
+        })),
+        Step::Emit(json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "some_future_content_kind", "payload": { "a": 1 } },
+            "messageId": "m2"
+        })),
+        Step::Emit(json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "a1",
+            "title": "A tool of unknown kind",
+            "kind": "telepathy",
+            "status": "in_progress"
+        })),
+        Step::Emit(json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "a1",
+            "status": "supernova"
+        })),
+        Step::Emit(message(Some("m3"), "survived the alien updates")),
+    ]
+}
+
+fn flood() -> Vec<Step> {
+    let mut steps = vec![Step::Emit(thought(Some("f0"), "flooding: "))];
+    for i in 0..400 {
+        steps.push(Step::Emit(thought(Some("f0"), &format!("{i} "))));
+    }
+    for i in 0..200 {
+        steps.push(Step::Emit(message(Some("f1"), &format!("token{i} "))));
+    }
+    steps
+}

@@ -11,7 +11,7 @@ pub mod turn;
 
 pub use event::*;
 pub use normalize::{max_concurrent_live, Normalizer, RawUpdate};
-pub use turn::{TurnView, ViewBuilder};
+pub use turn::{SegmentView, ToolCallView, TurnItem, TurnView, ViewBuilder};
 
 #[cfg(test)]
 mod tests;
