@@ -52,6 +52,10 @@ pub struct AppState {
     pub events: broadcast::Sender<Event>,
     pub raw: Mutex<Vec<InspectorFrame>>,
     pub degraded: Option<String>,
+    /// Where the database, blobs, boot state and process registry live. Held because the
+    /// orchestrator will place worktrees relative to it, and a diagnostics export needs to know
+    /// what to collect.
+    #[allow(dead_code)]
     pub state_dir: std::path::PathBuf,
     /// Permission requests currently on screen, keyed by request id.
     pub pending_permissions: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Option<String>>>>,
