@@ -13,10 +13,27 @@ things that are easy to get wrong and are visible here:
 - **The prompt is a quote line, not a bubble.** This is not two people talking. It is an instruction
   with an execution trace under it.
 - **The diff is a diff.** Line numbers, per-side colouring, a count in the card header. Not grey text.
+  The header count and the diff's own count agree, which they did not until reading this screenshot
+  caught them disagreeing: the header said `+5 −3` over a body saying `+4 −2`, because the header
+  approximated with a common-prefix heuristic and counted the closing brace shared by both versions
+  as an addition and a deletion at once. Two numbers for one thing, side by side.
 - **The composer footer says `(restarts)` next to the model and thinking-level selectors.** Changing
   either can only take effect when the agent process starts, so changing it mid-conversation means a
   new session carrying a summary of this one. The control says so rather than looking like an
   in-place switch that changes nothing.
+
+`file-boundary.png` is an agent trying to leave its workspace five ways, and it exists because the
+first version of this interface showed none of this. Files read and written for an agent through the
+protocol's file methods were recorded in the log and rendered nowhere, so an agent that edits that way
+— the path the daemon encourages, since it is the only one that is bounded and logged — produced a
+transcript containing a thought, an answer, and no sign that a file had changed. Refusals were
+invisible too, which is worse: the boundary was enforced and the person watching was told nothing.
+
+Now an allowed access is a quiet row with a byte count, because a turn can contain many reads and
+giving each the weight of a tool call buries the two that changed something. A refusal is not quiet,
+and it says why in words — "a symlink led outside the workspace" rather than `symlink-encountered`.
+The stored value stays the identifier so logs and tests can match on it; the sentence is for the
+person being told their agent was stopped.
 
 `tauri-linux-empty.png` is the same shell with no session open, which is the state that shows the
 autonomy selector sitting above the input box rather than in the row with the per-moment controls.

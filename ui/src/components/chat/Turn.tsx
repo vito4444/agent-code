@@ -87,6 +87,9 @@ function ItemView({
     case 'error':
       return <div className="turn-error">{item.message}</div>;
 
+    case 'file':
+      return <FileAccessRow item={item} />;
+
     default:
       return null;
   }
@@ -165,6 +168,78 @@ export function PermissionCard({
   );
 }
 
+/**
+ * One file the client read or wrote for the agent.
+ *
+ * A row rather than a card. There can be many reads in a turn and giving each the weight of a tool
+ * call would bury the two or three that changed something — but leaving them out entirely, which is
+ * what happened first, means an agent that edits through the protocol's file methods produces a
+ * transcript with no sign that any file changed.
+ *
+ * A refusal is not quiet. It is the one line in a transcript that says the agent tried to leave its
+ * workspace, and enforcement the reader cannot see is enforcement they cannot audit. So it keeps the
+ * attention colour, states the reason in words rather than as a code, and never collapses into the
+ * run of ordinary rows above it.
+ */
+function FileAccessRow({
+  item,
+}: {
+  item: Extract<TurnItem, { type: 'file' }>;
+}) {
+  const verb = item.op === 'write' ? 'Wrote' : 'Read';
+  if (item.allowed) {
+    return (
+      <div className="file-row" data-testid={`file-${item.requested}`}>
+        <span className="file-op">{verb}</span>
+        <code className="file-path">{item.resolved ?? item.requested}</code>
+        {item.bytes !== null && <span className="file-bytes">{formatBytes(item.bytes)}</span>}
+      </div>
+    );
+  }
+  return (
+    <div className="file-row refused" data-testid={`file-refused-${item.requested}`}>
+      <span className="file-op">Refused</span>
+      <code className="file-path">{item.requested}</code>
+      <span className="file-reason">{refusalText(item.refusal)}</span>
+    </div>
+  );
+}
+
+/**
+ * Plain words for a refusal.
+ *
+ * The stored value is a stable identifier so that logs and tests can match on it, which is the right
+ * shape for a machine and the wrong one for the person being told their agent was stopped. Anything
+ * unrecognised falls through verbatim rather than becoming "refused": a reason nobody has written a
+ * sentence for yet is still more useful than no reason.
+ */
+function refusalText(kind: string | null): string {
+  switch (kind) {
+    case 'outside-root':
+      return 'outside the workspace';
+    case 'symlink-encountered':
+      return 'a symlink led outside the workspace';
+    case 'parent-traversal':
+      return 'the path tried to climb above the workspace';
+    case 'not-found':
+      return 'no such file';
+    case 'not-a-directory':
+      return 'a component of the path is not a directory';
+    case 'too-large':
+      return 'too large to return in one response';
+    case null:
+      return 'refused';
+    default:
+      return kind;
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} kB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function itemKey(item: TurnItem, index: number): string {
   switch (item.type) {
     case 'segment':
@@ -173,6 +248,8 @@ function itemKey(item: TurnItem, index: number): string {
       return `t:${item.call.tool_call_id}`;
     case 'permission':
       return `p:${item.request_id}`;
+    case 'file':
+      return `f:${index}:${item.requested}`;
     default:
       return `e:${index}`;
   }

@@ -70,8 +70,8 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace              # 277 tests
-cd ui && pnpm vitest run            # 69 tests
+cargo test --workspace              # 280 tests
+cd ui && pnpm vitest run            # 84 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 47 assertions, the conversation slice
 ./scripts/e2e-orchestration.sh      # 50 assertions, one run start to finish
@@ -415,6 +415,35 @@ survives review. Now asserted in the slice check.
 
 **The event batcher threw `Illegal invocation`.** `requestAnimationFrame` was passed as a bare
 default parameter, losing its binding to `window`.
+
+### Found by looking at screenshots of the running interface
+
+Three, and all three were invisible to every test in the repository at the time.
+
+**Files touched for an agent were rendered nowhere.** The events were recorded, the audit list held
+them, and the transcript showed nothing. For an agent that edits through the protocol's file
+methods — the path the daemon encourages, because it is the only one that is bounded and logged —
+that means a turn containing a thought, an answer, and no sign that a file changed. Refusals were
+invisible too, which is the worse half: the boundary was enforced and the person watching was told
+nothing. The end-to-end assertion that reads "refusals are recorded, not swallowed" was accurate
+about the log and said nothing about the interface, and it has been renamed to say so.
+
+The fix needed three layers, and finding that out took two rounds: adding the item to the Rust view
+builder changed nothing on screen, because the interface folds events with its own reducer and the
+Rust builder is a mirror. Rendering it changed nothing either, because nothing produced the item.
+The layer that decides what is on screen is `store.ts`, and it is the layer that had no test.
+
+**Two counts for one change, side by side.** A tool card header read `+5 −3` directly above a diff
+reading `+4 −2`. The header approximated with a common-prefix heuristic while the body ran a real
+line diff, so a line shared at the *end* of both versions — a closing brace — was counted as an
+addition and a deletion at once by one and as context by the other. They now share one function.
+The first test written for this could not fail: it asserted the card's text contained `+4`, and the
+card contains the header *and* the body, so the correct number was always present somewhere in it.
+It now compares the two elements to each other.
+
+**Three identical rows for three different pieces of work.** Orchestrated workers are rooted at
+`worktrees/<run>/<task>`, and the sidebar truncated the path from the right — which is where the
+distinguishing part is. All three read `/home/me/.local/state/wkbd/worktre…`.
 
 ### Found by connecting the orchestrator
 

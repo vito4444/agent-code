@@ -217,7 +217,23 @@ export type EventPayload =
   | { event: 'run'; run: RunEvent }
   | { event: 'unknown_update'; discriminant: string; raw: string }
   | { event: 'agent_error'; message: string }
-  | { event: 'agent_exited'; code: number | null; signal: number | null };
+  | { event: 'agent_exited'; code: number | null; signal: number | null }
+  | {
+      /**
+       * A file the client read or wrote because the agent asked it to.
+       *
+       * The protocol has the client do this, with an absolute path the agent chose and no boundary
+       * of its own, so every one of these is a decision the daemon made on the agent's behalf and
+       * every one is recorded — allowed or refused.
+       */
+      event: 'file_access';
+      op: 'read' | 'write';
+      requested: string;
+      resolved: string | null;
+      allowed: boolean;
+      refusal: string | null;
+      bytes: number | null;
+    };
 
 export interface WkbdEvent {
   seq: number;
@@ -255,7 +271,23 @@ export type TurnItem =
       resolved_with: string | null;
       auto: boolean;
     }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | {
+      /**
+       * A file read or written on the agent's behalf.
+       *
+       * In the turn rather than only in an audit list, because for an agent that edits through the
+       * protocol's file methods this *is* the work. Without it the transcript of such an agent shows
+       * a thought and an answer and no sign that anything changed.
+       */
+      type: 'file';
+      op: 'read' | 'write';
+      requested: string;
+      resolved: string | null;
+      allowed: boolean;
+      refusal: string | null;
+      bytes: number | null;
+    };
 
 export interface TurnView {
   turn: number;

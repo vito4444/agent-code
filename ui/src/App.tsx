@@ -117,7 +117,9 @@ export function App() {
                 }}
               >
                 <span className="session-agent">{s.agent_display_name}</span>
-                <span className="session-title">{s.title ?? s.project_root}</span>
+                <span className="session-title" title={s.project_root}>
+                  <bdi>{s.title ?? s.project_root}</bdi>
+                </span>
               </button>
             </li>
           ))}

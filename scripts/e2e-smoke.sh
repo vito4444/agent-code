@@ -413,7 +413,7 @@ if [ -n "$SID3" ]; then
     # Every attempt is recorded, allowed or not. Enforcement with no record cannot be audited.
     check_ge "boundary: attempts recorded" 8 \
         "$(jq -r '[.[]|select(.payload.event=="file_access")]|length' "$E3")"
-    check "boundary: refusals are visible in the turn, not swallowed" "true" \
+    check "boundary: refusals are recorded, not swallowed" "true" \
         "$(jq -r '[.[]|select(.payload.event=="file_access" and .payload.allowed==false)]|length >= 5' "$E3")"
 else
     echo "FAIL could not open a session against the probing agent"

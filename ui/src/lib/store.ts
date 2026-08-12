@@ -362,6 +362,36 @@ export function applyOne(state: SessionState, payload: EventPayload): SessionSta
     case 'segment_settled':
       return mapSegment(state, payload.segment.raw, (s) => ({ ...s, state: 'settled' }));
 
+    // A file we read or wrote for the agent.
+    //
+    // Folded into the turn in arrival order, so it sits where it happened relative to the thoughts
+    // and tool calls around it. Keeping it out of the turn — which is what the first version did,
+    // leaving it only in an audit list — means an agent that edits through the protocol's file
+    // methods produces a transcript showing a thought, an answer, and no sign that a file changed.
+    // A refusal kept out of the turn is worse: the boundary is enforced and the person watching is
+    // told nothing about it.
+    case 'file_access': {
+      const turns = [...state.turns];
+      const ti = turns.length - 1;
+      if (ti < 0) return state;
+      turns[ti] = {
+        ...turns[ti],
+        items: [
+          ...turns[ti].items,
+          {
+            type: 'file',
+            op: payload.op,
+            requested: payload.requested,
+            resolved: payload.resolved,
+            allowed: payload.allowed,
+            refusal: payload.refusal,
+            bytes: payload.bytes,
+          },
+        ],
+      };
+      return { ...state, turns };
+    }
+
     case 'tool_call_started': {
       const turns = [...state.turns];
       const ti = turns.length - 1;

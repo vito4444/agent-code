@@ -34,8 +34,7 @@ export function DiffView({ path, oldText, newText, maxLines = 60 }: DiffViewProp
 
   const truncated = rows.length > maxLines;
   const shown = truncated ? rows.slice(0, maxLines) : rows;
-  const added = rows.filter((r) => r.kind === 'add').length;
-  const removed = rows.filter((r) => r.kind === 'del').length;
+  const { added, removed } = diffStats(oldText, newText);
 
   return (
     <div className="diff" data-testid={`diff-${path}`}>
@@ -68,6 +67,26 @@ export function DiffView({ path, oldText, newText, maxLines = 60 }: DiffViewProp
       )}
     </div>
   );
+}
+
+/**
+ * How many lines a change adds and removes.
+ *
+ * Shared with the collapsed card header rather than approximated there. It was approximated there,
+ * with a common-prefix heuristic, and the two disagreed on screen: a card reading `+5 −3` above a
+ * diff reading `+4 −2` for the same change, because a shared trailing line was counted as both an
+ * addition and a deletion by the heuristic and as context by the real diff. Two numbers for one
+ * thing, side by side, is worse than either number alone.
+ */
+export function diffStats(oldText: string | null, newText: string): { added: number; removed: number } {
+  if (oldText === null) {
+    return { added: newText.split('\n').length, removed: 0 };
+  }
+  const rows = diffLines(oldText.split('\n'), newText.split('\n'));
+  return {
+    added: rows.filter((r) => r.kind === 'add').length,
+    removed: rows.filter((r) => r.kind === 'del').length,
+  };
 }
 
 export function diffLines(a: string[], b: string[]): Row[] {

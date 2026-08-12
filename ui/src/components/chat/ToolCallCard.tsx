@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ToolCallView, ToolContent } from '../../lib/types';
 import { toolKindName } from '../../lib/types';
-import { DiffView } from './DiffView';
+import { DiffView, diffStats } from './DiffView';
 import { TerminalView } from './TerminalView';
 
 /**
@@ -102,11 +102,11 @@ function DiffStat({ content }: { content: ToolContent[] }) {
   let removed = 0;
   for (const c of content) {
     if (c.type !== 'diff') continue;
-    const oldLines = (c.old_text ?? '').split('\n');
-    const newLines = c.new_text.split('\n');
-    const common = commonPrefixLength(oldLines, newLines);
-    added += newLines.length - common;
-    removed += (c.old_text === null ? 0 : oldLines.length) - common;
+    // The same diff the body renders. Counting it a second way here is how the header came to read
+    // `+5 −3` over a body reading `+4 −2` for one change.
+    const stats = diffStats(c.old_text ?? null, c.new_text);
+    added += stats.added;
+    removed += stats.removed;
   }
   return (
     <span className="diff-stat">
@@ -116,8 +116,3 @@ function DiffStat({ content }: { content: ToolContent[] }) {
   );
 }
 
-function commonPrefixLength(a: string[], b: string[]): number {
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  return i;
-}

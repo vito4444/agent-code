@@ -41,16 +41,25 @@ pub enum TurnItem {
     Error {
         message: String,
     },
-    /// A file access we refused.
+    /// A file access performed on the agent's behalf, allowed or refused.
     ///
-    /// Its own item rather than a generic error: a refusal is a boundary decision, not a fault,
-    /// and the reader needs to be able to tell "the agent tried to leave its workspace" from
-    /// "something broke". Allowed accesses are not rendered inline — there are far too many of
-    /// them — and live in the audit list instead.
-    FileRefused {
+    /// In the turn, in order, rather than only in the audit list. Both halves of that matter and the
+    /// first version got both wrong by keeping allowed accesses out of the transcript entirely.
+    ///
+    /// An allowed write is the agent's work. For an agent that edits through the protocol's file
+    /// methods — the path we encourage, because it is the only one that is bounded and logged — the
+    /// transcript otherwise shows a thought and an answer and no sign that any file changed.
+    ///
+    /// A refusal is a boundary decision rather than a fault, and it is the single most interesting
+    /// line a transcript can contain. Enforcement the user cannot see is enforcement they cannot
+    /// audit.
+    File {
         op: FileOp,
         requested: String,
-        refusal: String,
+        resolved: Option<String>,
+        allowed: bool,
+        refusal: Option<String>,
+        bytes: Option<u64>,
     },
 }
 
@@ -309,14 +318,15 @@ impl ViewBuilder {
                     refusal: refusal.clone(),
                     bytes: *bytes,
                 });
-                if !*allowed {
-                    if let Some(t) = self.turns.last_mut() {
-                        t.items.push(TurnItem::FileRefused {
-                            op: *op,
-                            requested: requested.clone(),
-                            refusal: refusal.clone().unwrap_or_else(|| "refused".into()),
-                        });
-                    }
+                if let Some(t) = self.turns.last_mut() {
+                    t.items.push(TurnItem::File {
+                        op: *op,
+                        requested: requested.clone(),
+                        resolved: resolved.clone(),
+                        allowed: *allowed,
+                        refusal: refusal.clone(),
+                        bytes: *bytes,
+                    });
                 }
             }
             EventPayload::AgentExited { code, signal } => {
@@ -346,5 +356,94 @@ impl ViewBuilder {
             Some((_, 0, _)) | None => None,
             Some((used, size, _)) => Some((used as f64 / size as f64) * 100.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod file_access_view_tests {
+    use super::*;
+    use crate::event::FileOp;
+
+    fn access(requested: &str, allowed: bool) -> EventPayload {
+        EventPayload::FileAccess {
+            op: FileOp::Write,
+            requested: requested.to_string(),
+            resolved: allowed.then(|| requested.to_string()),
+            allowed,
+            refusal: (!allowed).then(|| "outside-root".to_string()),
+            bytes: allowed.then_some(12),
+        }
+    }
+
+    fn built(payloads: &[EventPayload]) -> TurnView {
+        let mut b = ViewBuilder::new();
+        b.apply_all(payloads);
+        b.into_turns().pop().expect("a turn")
+    }
+
+    /// The defect this guards. An agent that edits through the protocol's file methods — the path
+    /// the daemon encourages, since it is the only one that is bounded and logged — produced a
+    /// transcript containing a thought and an answer and no sign that any file had changed, because
+    /// allowed accesses went only to the audit list.
+    #[test]
+    fn an_allowed_write_appears_in_the_turn() {
+        let view = built(&[
+            EventPayload::TurnStarted { turn: 1, prompt: "go".into() },
+            access("/w/a.rs", true),
+        ]);
+        assert!(
+            view.items.iter().any(|i| matches!(
+                i,
+                TurnItem::File { requested, allowed: true, .. } if requested == "/w/a.rs"
+            )),
+            "an allowed write must be in the transcript, not only in the audit list: {:?}",
+            view.items
+        );
+    }
+
+    /// Enforcement the reader cannot see is enforcement they cannot audit.
+    #[test]
+    fn a_refusal_appears_in_the_turn_with_its_reason() {
+        let view = built(&[
+            EventPayload::TurnStarted { turn: 1, prompt: "go".into() },
+            access("/etc/passwd", false),
+        ]);
+        let found = view.items.iter().find_map(|i| match i {
+            TurnItem::File { requested, allowed: false, refusal, .. } => {
+                Some((requested.clone(), refusal.clone()))
+            }
+            _ => None,
+        });
+        assert_eq!(
+            found,
+            Some(("/etc/passwd".to_string(), Some("outside-root".to_string())))
+        );
+    }
+
+    /// Order is the point of putting them in the turn at all: a read before a command ran and one
+    /// after it tell different stories.
+    #[test]
+    fn accesses_keep_their_place_relative_to_everything_else() {
+        let view = built(&[
+            EventPayload::TurnStarted { turn: 1, prompt: "go".into() },
+            access("/w/first.rs", true),
+            EventPayload::ToolCallStarted {
+                tool_call_id: "t1".into(),
+                title: "Run tests".into(),
+                kind: ToolKind::Execute,
+                status: ToolStatus::InProgress,
+            },
+            access("/w/second.rs", true),
+        ]);
+        let order: Vec<&str> = view
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                TurnItem::File { requested, .. } => Some(requested.as_str()),
+                TurnItem::ToolCall(_) => Some("tool"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, vec!["/w/first.rs", "tool", "/w/second.rs"]);
     }
 }

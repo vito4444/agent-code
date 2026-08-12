@@ -73,6 +73,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Truncated from the left, because the end of a path is the part that distinguishes it. Three
+     orchestrated workers rooted at .../worktrees/<run>/<task> all render as
+     "/home/me/.local/state/wkbd/worktre…" when the ellipsis is on the right, which is three
+     identical rows for three different pieces of work. */
+  direction: rtl;
+  text-align: left;
+}
+
+/* The path itself stays left-to-right. Without this the `rtl` above moves a leading slash to the
+   end, and a path that reads "home/me/wkbd/" is worse than one that is truncated. */
+.session-title > bdi {
+  direction: ltr;
+  unicode-bidi: bidi-override;
 }
 
 .sidebar-footer {
@@ -1719,4 +1732,59 @@
   white-space: pre-wrap;
   word-break: break-all;
   font-family: var(--font-mono);
+}
+
+/* A file read or written for the agent.
+   A row, not a card: a turn can contain many reads, and giving each of them the weight of a tool
+   call buries the two that changed something. A refusal breaks out of that quietness on purpose —
+   it is the line that says the agent tried to leave its workspace. */
+.file-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+.file-op {
+  flex: 0 0 auto;
+  font-size: var(--chat-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-subtle);
+}
+
+.file-path {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-default);
+  overflow-wrap: anywhere;
+}
+
+.file-bytes {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.file-row.refused {
+  color: var(--fg-attention);
+  background: var(--bg-attention-muted);
+  border-left: 2px solid var(--fg-attention);
+  border-radius: var(--radius-small);
+  padding: var(--space-8);
+  margin: var(--space-4) 0;
+}
+
+.file-row.refused .file-op,
+.file-row.refused .file-path {
+  color: var(--fg-attention);
+  font-weight: 600;
+}
+
+.file-row.refused .file-reason {
+  margin-left: auto;
+  font-size: var(--chat-font-size-xs);
 }

@@ -446,3 +446,66 @@ function runStarted(id: string) {
     base_commit: 'abc1234',
   };
 }
+
+describe('files the client touched, folded into a turn', () => {
+  function fileEvent(over: Partial<Extract<EventPayload, { event: 'file_access' }>>): EventPayload {
+    return {
+      event: 'file_access',
+      op: 'write',
+      requested: '/w/a.rs',
+      resolved: '/w/a.rs',
+      allowed: true,
+      refusal: null,
+      bytes: 12,
+      ...over,
+    };
+  }
+
+  function turnWith(payloads: EventPayload[]) {
+    let state = emptySession();
+    state = applyOne(state, { event: 'turn_started', turn: 1, prompt: 'go' });
+    for (const p of payloads) state = applyOne(state, p);
+    return state.turns[state.turns.length - 1];
+  }
+
+  /**
+   * The gap this closes was not in the rendering, which had a test, but in the folding, which did
+   * not. The component was handed a file item by hand and drew it correctly, while nothing produced
+   * one from an event — so an agent that edited through the protocol's file methods still produced a
+   * transcript with a thought, an answer, and no sign that a file had changed.
+   */
+  it('turns an allowed write into an item in the turn', () => {
+    const turn = turnWith([fileEvent({})]);
+    expect(turn.items).toContainEqual(
+      expect.objectContaining({ type: 'file', requested: '/w/a.rs', allowed: true }),
+    );
+  });
+
+  it('turns a refusal into an item carrying its reason', () => {
+    const turn = turnWith([
+      fileEvent({ requested: '/etc/passwd', resolved: null, allowed: false, refusal: 'outside-root', bytes: null }),
+    ]);
+    expect(turn.items).toContainEqual(
+      expect.objectContaining({ type: 'file', allowed: false, refusal: 'outside-root' }),
+    );
+  });
+
+  /** Order is why these live in the turn at all rather than in a list beside it. */
+  it('keeps them in arrival order among the other items', () => {
+    const turn = turnWith([
+      fileEvent({ requested: '/w/first.rs' }),
+      { event: 'tool_call_started', tool_call_id: 't1', title: 'Run tests', kind: 'execute', status: 'in_progress' },
+      fileEvent({ requested: '/w/second.rs' }),
+    ]);
+    const shape = turn.items.map((i) =>
+      i.type === 'file' ? i.requested : i.type === 'tool_call' ? 'tool' : i.type,
+    );
+    expect(shape).toEqual(['/w/first.rs', 'tool', '/w/second.rs']);
+  });
+
+  /** An access arriving with no turn open must not invent one or crash the fold. */
+  it('is dropped rather than crashing when no turn is open', () => {
+    const state = applyOne(emptySession(), fileEvent({}));
+    expect(state.turns).toHaveLength(0);
+  });
+});
