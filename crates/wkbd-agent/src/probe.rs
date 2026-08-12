@@ -313,6 +313,22 @@ pub async fn probe_agent(
             }
         }
 
+        // The response to session/prompt can arrive before notifications that were sent
+        // ahead of it. Ending the turn here without draining loses the tail — typically the
+        // final answer and the last tool result, which is exactly what the matrix is
+        // supposed to measure. See the same drain in the session runner.
+        while let Ok(msg) = rx.try_recv() {
+            if let Incoming::Notification { method, params } = msg {
+                if method == "session/update" {
+                    if let Some(update) = params.get("update") {
+                        let raw = wire::map_session_update(update, false);
+                        observe(&mut report, &raw);
+                        payloads.extend(normalizer.push(raw));
+                    }
+                }
+            }
+        }
+
         payloads.extend(normalizer.end_turn(wire::parse_stop_reason(report.stop_reason.as_deref())));
 
         // Segment identity only exists after normalization, so the counts that matter for

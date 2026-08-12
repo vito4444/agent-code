@@ -19,7 +19,12 @@
 //! Environment hygiene matters for the same reason: the daemon can be started from
 //! inside a git context (a hook, a rebase, an IDE task), and an inherited `GIT_DIR` or
 //! `GIT_INDEX_FILE` would silently redirect every operation here at some other
-//! repository — including the ones that write objects.
+//! repository — including the ones that write objects. What this does is remove the
+//! variables that can redirect git; it deliberately does not build an environment from
+//! nothing, because these invocations are the daemon's own and the user's global git
+//! configuration (credential helpers, `include.path`) has to keep working. Git commands
+//! run *on behalf of an agent* are a different threat model and belong behind
+//! `wkbd-sec::git_env`, not here.
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;

@@ -1,0 +1,186 @@
+/*
+ * Design tokens.
+ *
+ * The spacing scale, control sizes, radii and font stacks are GitHub Primer's published
+ * primitives. The type scale is VS Code's chat scale, which is relative (em against a
+ * single base) rather than absolute. That combination is deliberate: Primer's absolute
+ * spacing keeps a dense interface consistent, while a relative type scale means one
+ * variable rescales all text, which a desktop application needs and a website does not.
+ *
+ * Colour tokens are named after VS Code's chat theme keys and given Primer values, so that
+ * a future theme can be swapped in by redefining variables rather than by editing
+ * components.
+ */
+
+:root {
+  /* Type scale, relative to --chat-font-size-base. Comments give the resolved px at 13px
+     base, matching VS Code's own annotations. */
+  --chat-font-size-base: 13px;
+  --chat-font-size-xs: 0.846em;   /* 11px */
+  --chat-font-size-s: 0.923em;    /* 12px */
+  --chat-font-size-m: 1em;        /* 13px */
+  --chat-font-size-l: 1.077em;    /* 14px */
+  --chat-font-size-xl: 1.231em;   /* 16px */
+  --chat-font-size-xxl: 1.538em;  /* 20px */
+
+  --chat-line-height-tight: 1.25;
+  --chat-line-height-normal: 1.5;
+  --chat-line-height-relaxed: 1.625;
+
+  /* Primer base spacing. Note 2 and 6 exist: the scale is not pure multiples of four. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+
+  /* Primer stack gaps. */
+  --stack-gap-condensed: 8px;
+  --stack-gap-normal: 16px;
+  --stack-gap-spacious: 24px;
+
+  /* Primer control sizes. Toolbar buttons use small or medium. */
+  --control-small-size: 28px;
+  --control-small-padding-block: 4px;
+  --control-medium-size: 32px;
+  --control-medium-padding-block: 6px;
+  --control-padding-inline-condensed: 8px;
+  --control-padding-inline-normal: 12px;
+  --control-gap: 8px;
+
+  --radius-small: 3px;
+  --radius-medium: 6px;
+  --radius-large: 12px;
+  --radius-full: 9999px;
+
+  --border-thin: 1px;
+  --border-thick: 2px;
+  --focus-outline-width: 2px;
+  --focus-outline-offset: -2px;
+
+  --font-sans: 'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans',
+    Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  /* The conversation column is capped rather than filling the window. Long measure hurts
+     readability, and the transcript is prose plus code, not a dashboard. */
+  --conversation-max-width: 950px;
+
+  /* Light theme, Primer values. */
+  --fg-default: #1f2328;
+  --fg-muted: #59636e;
+  --fg-subtle: #818b98;
+  --fg-accent: #0969da;
+  --fg-success: #1a7f37;
+  --fg-danger: #d1242f;
+  --fg-attention: #9a6700;
+  --fg-on-emphasis: #ffffff;
+
+  --bg-default: #ffffff;
+  --bg-muted: #f6f8fa;
+  --bg-inset: #f6f8fa;
+  --bg-subtle: #eff2f5;
+  --bg-accent-emphasis: #0969da;
+  --bg-success-muted: #dafbe1;
+  --bg-danger-muted: #ffebe9;
+  --bg-attention-muted: #fff8c5;
+
+  --border-default: #d1d9e0;
+  --border-muted: #d1d9e0b3;
+  --focus-outline-color: #0969da;
+
+  /* Named after VS Code's chat.* theme keys so the mapping is obvious. */
+  --chat-request-bubble-background: #f6f8fa;
+  --chat-request-border: #d1d9e0;
+  --chat-request-code-border: #d1d9e0;
+  --chat-lines-added-foreground: #1a7f37;
+  --chat-lines-removed-foreground: #d1242f;
+  --chat-edited-file-foreground: #0969da;
+  --chat-thinking-shimmer: #818b98;
+  --chat-checkpoint-separator: #d1d9e0;
+  --chat-slash-command-background: #eff2f5;
+
+  --inline-chat-diff-inserted: #dafbe1;
+  --inline-chat-diff-removed: #ffebe9;
+
+  --terminal-background: #24292f;
+  --terminal-foreground: #f0f3f6;
+}
+
+:root[data-theme='dark'] {
+  --fg-default: #f0f6fc;
+  --fg-muted: #9198a1;
+  --fg-subtle: #6e7681;
+  --fg-accent: #4493f8;
+  --fg-success: #3fb950;
+  --fg-danger: #f85149;
+  --fg-attention: #d29922;
+  --fg-on-emphasis: #ffffff;
+
+  --bg-default: #0d1117;
+  --bg-muted: #151b23;
+  --bg-inset: #010409;
+  --bg-subtle: #212830;
+  --bg-accent-emphasis: #1f6feb;
+  --bg-success-muted: #0f2f1a;
+  --bg-danger-muted: #2d1214;
+  --bg-attention-muted: #2d2611;
+
+  --border-default: #3d444d;
+  --border-muted: #3d444db3;
+  --focus-outline-color: #4493f8;
+
+  --chat-request-bubble-background: #151b23;
+  --chat-request-border: #3d444d;
+  --chat-request-code-border: #3d444d;
+  --chat-lines-added-foreground: #3fb950;
+  --chat-lines-removed-foreground: #f85149;
+  --chat-edited-file-foreground: #4493f8;
+  --chat-thinking-shimmer: #6e7681;
+  --chat-checkpoint-separator: #3d444d;
+  --chat-slash-command-background: #212830;
+
+  --inline-chat-diff-inserted: #0f2f1a;
+  --inline-chat-diff-removed: #2d1214;
+
+  --terminal-background: #010409;
+  --terminal-foreground: #f0f6fc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-base);
+  line-height: var(--chat-line-height-normal);
+  color: var(--fg-default);
+  background: var(--bg-default);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: var(--focus-outline-width) solid var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  /* Primer's code block size: 13px at 1.5, independent of the surrounding text size. */
+  font-size: 0.8125rem;
+}

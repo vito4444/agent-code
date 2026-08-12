@@ -313,14 +313,17 @@ pub struct HydrationReport {
 
 /// Copies the declared files into `worktree` and runs the setup commands there.
 ///
-/// Path safety is enforced here rather than delegated: `wkbd-sec` is still a placeholder
-/// crate, and this module must not wait for it — hydration is the one operation that
-/// reads from the user's real checkout and writes into an agent-visible directory, so it
-/// is precisely where an unchecked path is worth the most to an attacker. The rules are:
-/// no symlinks are followed or copied (in either tree), patterns may not be absolute or
-/// contain `..` (enforced in `pathset`), and every destination is re-checked to be inside
-/// the worktree after resolution. When `wkbd-sec` grows a real path-confinement API these
-/// checks should be replaced by it, not duplicated.
+/// Path safety is enforced here rather than delegated. `wkbd-sec::path_guard` confines
+/// paths for a different threat model — an agent naming a path over the protocol, where
+/// the answer must be an already-open descriptor so it cannot go stale — and this crate
+/// does not depend on it: hydration is a daemon-to-daemon copy between two trees we
+/// chose, and taking a dependency on an interface that is still being written would make
+/// the one operation that reads the user's real checkout the first casualty of an API
+/// change. The rules enforced here are: no symlink is followed or copied in either tree,
+/// patterns may not be absolute or contain `..` (see `pathset`), and every destination is
+/// re-checked to be inside the worktree after resolution. If these ever need to become
+/// three rules instead of one implementation, they should move behind `wkbd-sec` rather
+/// than be copied a second time.
 pub fn hydrate(worktree: &Path, spec: &HydrationSpec) -> Result<HydrationReport> {
     let mut report = HydrationReport::default();
 

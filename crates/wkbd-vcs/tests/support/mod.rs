@@ -132,6 +132,8 @@ pub fn directory_rename_split() -> RenameSplit {
     let base = repo.commit_all("base");
 
     repo.git(&["checkout", "-q", "-b", "P"]);
+    std::fs::create_dir_all(repo.path.join("dirB")).expect("dirB");
+    std::fs::create_dir_all(repo.path.join("dirC")).expect("dirC");
     repo.git(&["mv", "dirA/f1.txt", "dirB/f1.txt"]);
     repo.git(&["mv", "dirA/f2.txt", "dirC/f2.txt"]);
     let p = repo.commit_all("split dirA into dirB and dirC");
