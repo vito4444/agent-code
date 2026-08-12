@@ -242,17 +242,25 @@ enum Readiness {
 /// are different answers and lead to different behaviour.
 fn health(url: &str) -> Option<Option<u32>> {
     let body = http_get(url)?;
-    // A three-field JSON object read with `find`, to keep a JSON parser out of a shell that makes one
-    // request. Anything more structured than this belongs in the daemon.
-    let pid = body.split("\"pid\"").nth(1).and_then(|rest| {
-        let digits: String = rest
-            .trim_start_matches([':', ' '])
-            .chars()
-            .take_while(|c| c.is_ascii_digit())
-            .collect();
-        digits.parse().ok()
-    });
-    Some(pid)
+    Some(pid_from_health(&body))
+}
+
+/// Pulls `"pid": N` out of a health response.
+///
+/// Read by hand rather than with a JSON parser, to keep one out of a process that makes a single
+/// request against loopback. The key is matched with its quotes and colon so that a substring like
+/// `"stupid"` cannot supply the number — which is the failure a looser match invites, and it would
+/// make the shell refuse to run for a reason nobody could see.
+fn pid_from_health(body: &str) -> Option<u32> {
+    let at = body.find("\"pid\"")?;
+    let rest = &body[at + 5..];
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// The smallest HTTP GET that answers the question.
@@ -319,4 +327,48 @@ fn failure_page(log: &PathBuf, why: &Readiness) -> String {
     };
 
     format!("<div style=\"{frame}\">{body}</div>")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The check that stops the shell adopting a daemon it did not start. Parsed by hand because this
+    /// process makes one request and a JSON dependency for it would be the larger mistake — but "by
+    /// hand" is exactly why it needs tests.
+    #[test]
+    fn reads_the_pid_out_of_a_health_body() {
+        let body = r#"{"ok":true,"read_only":false,"degraded":null,"agents":2,"pid":4321}"#;
+        assert_eq!(pid_from_health(body), Some(4321));
+    }
+
+    #[test]
+    fn tolerates_the_pid_arriving_first_or_last() {
+        assert_eq!(pid_from_health(r#"{"pid":7,"ok":true}"#), Some(7));
+        assert_eq!(pid_from_health(r#"{"ok":true,"pid":7}"#), Some(7));
+    }
+
+    #[test]
+    fn tolerates_whitespace_a_formatter_might_add() {
+        assert_eq!(pid_from_health("{ \"pid\" : 99 }"), Some(99));
+    }
+
+    /// An older daemon does not report one. That has to be `None` rather than an error: refusing to
+    /// run against a daemon that is merely old is a worse failure than the one being prevented.
+    #[test]
+    fn a_body_without_a_pid_is_not_an_error() {
+        assert_eq!(pid_from_health(r#"{"ok":true,"agents":0}"#), None);
+    }
+
+    /// Substring matching would find the `pid` inside another key and read whatever followed it.
+    #[test]
+    fn does_not_match_a_pid_inside_another_key() {
+        assert_eq!(pid_from_health(r#"{"stupid":5,"pid":6}"#), Some(6));
+        assert_eq!(pid_from_health(r#"{"rapid_mode":true}"#), None);
+    }
+
+    #[test]
+    fn a_non_numeric_pid_is_ignored_rather_than_guessed_at() {
+        assert_eq!(pid_from_health(r#"{"pid":"nine"}"#), None);
+    }
 }

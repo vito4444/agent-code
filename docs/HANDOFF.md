@@ -445,6 +445,25 @@ It now compares the two elements to each other.
 `worktrees/<run>/<task>`, and the sidebar truncated the path from the right — which is where the
 distinguishing part is. All three read `/home/me/.local/state/wkbd/worktre…`.
 
+### Found by looking at the running shell
+
+**The shell would adopt a daemon it did not start.** The port is fixed, so a stale daemon holding it
+makes the new one fail to bind and exit — after which the readiness check, which only asked whether
+*something* answered, passed against a process the shell cannot configure or restart. Every symptom is
+indirect: agents that were configured are missing, a flag has no effect, the interface is a version
+behind. `/api/health` reports its pid now and the shell compares it, and the failure page says which
+of the two things went wrong rather than always blaming startup.
+
+**The diagnostic page was mojibake.** Rendered from a `data:` URL with no charset, so the browser
+decoded UTF-8 bytes as latin-1 and every em dash arrived as three characters of noise. A page that
+looks corrupted is one the reader stops trusting halfway through.
+
+**A session created anywhere else stayed invisible.** The session list was fetched once at startup,
+which is right for the common case and wrong for every other one: the daemon serves more than one
+client, and the orchestrator opens sessions of its own. Those workers' transcripts are the only record
+of what a task actually did, which makes them the worst thing to hide. The interface now refetches
+when the stream mentions a session it has not heard of.
+
 ### Found by connecting the orchestrator
 
 Four more, and three of them needed two agent processes running at once — which is what the
