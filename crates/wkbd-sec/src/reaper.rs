@@ -24,6 +24,10 @@
 //!    matches on pid alone eventually kills whatever unrelated process inherited that
 //!    number, and that failure is far worse than the leak it was meant to fix.
 
+// The registry and the identity checks are platform-independent and will be reused by the
+// Windows implementation when it exists; until then nothing on Windows reaches them.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -179,6 +183,17 @@ impl Supervisor {
     pub fn registry_path(&self) -> Option<&Path> {
         self.registry.as_ref().map(|r| r.path.as_path())
     }
+
+    /// Boot-side sweep of this supervisor's own registry.
+    ///
+    /// Call it before spawning anything: an orphan from the previous run is still holding
+    /// the pty, the socket and the worktree lock that the new run is about to want.
+    pub fn sweep_own_registry(&self) -> Result<SweepReport, ReaperError> {
+        match self.registry_path() {
+            Some(path) => Supervisor::sweep_orphans(path),
+            None => Ok(SweepReport::default()),
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------------
@@ -238,7 +253,9 @@ mod unix_impl {
             unsafe {
                 cmd.pre_exec(move || {
                     // Layer 1. Covers the case where the daemon is SIGKILLed and never
-                    // runs any cleanup at all.
+                    // runs any cleanup at all. There is no macOS equivalent, which is why
+                    // `spawn_parent_watchdog` exists as the portable substitute.
+                    #[cfg(target_os = "linux")]
                     if libc::prctl(
                         libc::PR_SET_PDEATHSIG,
                         libc::SIGKILL as libc::c_ulong,
@@ -593,8 +610,7 @@ mod unix_impl {
         let mut reaped = false;
         loop {
             let mut status: libc::c_int = 0;
-            let rc =
-                unsafe { libc::waitpid(-(pgid as libc::pid_t), &mut status, libc::WNOHANG) };
+            let rc = unsafe { libc::waitpid(-(pgid as libc::pid_t), &mut status, libc::WNOHANG) };
             if rc <= 0 {
                 return reaped;
             }
@@ -842,13 +858,13 @@ pub fn pid_is_running(pid: u32) -> bool {
         #[cfg(target_os = "linux")]
         {
             // Distinguishes a zombie from a live process, which `kill(pid, 0)` cannot.
-            if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-                return match parse_proc_stat(&stat) {
+            match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+                Ok(stat) => match parse_proc_stat(&stat) {
                     Some(parsed) => parsed.state != 'Z',
                     None => false,
-                };
+                },
+                Err(_) => false,
             }
-            return false;
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -870,7 +886,8 @@ impl Registry {
     fn insert(&self, entry: RegistryEntry) -> Result<(), ReaperError> {
         let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut file = read_registry(&self.path)?;
-        file.entries.retain(|e| e.identity.pid != entry.identity.pid);
+        file.entries
+            .retain(|e| e.identity.pid != entry.identity.pid);
         file.entries.push(entry);
         write_registry(&self.path, &file)
     }
@@ -956,8 +973,8 @@ mod tests {
         // Cross-check the field offsets against this process rather than trusting the
         // hand-written line above.
         let me = std::process::id();
-        let live = parse_proc_stat(&std::fs::read_to_string(format!("/proc/{me}/stat")).unwrap())
-            .unwrap();
+        let live =
+            parse_proc_stat(&std::fs::read_to_string(format!("/proc/{me}/stat")).unwrap()).unwrap();
         let expected_pgrp = unsafe { libc::getpgid(me as libc::pid_t) } as u32;
         assert_eq!(live.pgrp, expected_pgrp);
         assert!(live.start_ticks > 0);

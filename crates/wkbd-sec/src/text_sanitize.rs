@@ -190,8 +190,8 @@ fn classify(c: char, previous: Option<char>, next: Option<char>) -> Option<Hidde
 
     if c == '\u{200D}' {
         // The single context-dependent rule in this module; see the module docs.
-        let joins_emoji = previous.is_some_and(is_emoji_component)
-            && next.is_some_and(is_emoji_component);
+        let joins_emoji =
+            previous.is_some_and(is_emoji_component) && next.is_some_and(is_emoji_component);
         return if joins_emoji {
             None
         } else {
@@ -251,11 +251,12 @@ fn is_format_char(u: u32) -> bool {
 
 /// Not format characters, but they render as nothing, which is all the attack needs.
 fn is_invisible_glyph(u: u32) -> bool {
-    matches!(u,
+    matches!(
+        u,
         0x115F | 0x1160           // Hangul choseong/jungseong fillers
         | 0x3164                  // Hangul filler
         | 0xFFA0                  // halfwidth Hangul filler
-        | 0x2800                  // braille pattern blank
+        | 0x2800 // braille pattern blank
     )
 }
 
@@ -321,7 +322,11 @@ mod tests {
         assert_eq!(first.column, 29);
         assert_eq!(first.kind, HiddenKind::ZeroWidth);
 
-        assert!(result.summary().contains("2 unicode-tag"), "{}", result.summary());
+        assert!(
+            result.summary().contains("2 unicode-tag"),
+            "{}",
+            result.summary()
+        );
     }
 
     #[test]
@@ -374,13 +379,13 @@ mod tests {
         // Each of these is byte-identical after sanitising, ZWJ and all.
         for input in [
             "👍",
-            "👨‍👩‍👧‍👦 family",           // three ZWJ
-            "🧑‍🤝‍🧑",                     // two people holding hands
-            "👩🏽‍💻 developer",            // skin tone + ZWJ
-            "🏳️‍🌈 flag",                 // VS16 + ZWJ
-            "🏴‍☠️",                       // ZWJ + VS16
-            "1️⃣2️⃣3️⃣",                  // keycaps
-            "🇯🇵🇺🇸",                     // regional indicator pairs
+            "👨‍👩‍👧‍👦 family",    // three ZWJ
+            "🧑‍🤝‍🧑",           // two people holding hands
+            "👩🏽‍💻 developer", // skin tone + ZWJ
+            "🏳️‍🌈 flag",      // VS16 + ZWJ
+            "🏴‍☠️",           // ZWJ + VS16
+            "1️⃣2️⃣3️⃣",       // keycaps
+            "🇯🇵🇺🇸",         // regional indicator pairs
             "ship it 🚢 now",
             "❤️",
         ] {
@@ -449,7 +454,11 @@ mod tests {
         for (character, expected) in cases {
             let input = format!("a{character}b");
             let result = sanitize_for_human(&input);
-            assert_eq!(result.text, "ab", "U+{:04X} was not removed", *character as u32);
+            assert_eq!(
+                result.text, "ab",
+                "U+{:04X} was not removed",
+                *character as u32
+            );
             assert_eq!(
                 result.removals[0].kind, *expected,
                 "U+{:04X} classified as {}",
@@ -486,7 +495,8 @@ mod tests {
     fn bidi_reordering_is_removed_even_though_the_visible_text_looks_fine() {
         // Trojan Source: the comment marker is moved by the override, so the reviewer
         // sees code that is commented out and the compiler sees code that is not.
-        let input = "if (accessLevel != \"user\u{202E} \u{2066}// Check if admin\u{2069}\u{2066}\") {";
+        let input =
+            "if (accessLevel != \"user\u{202E} \u{2066}// Check if admin\u{2069}\u{2066}\") {";
         let result = sanitize_for_human(input);
         assert_eq!(result.removals.len(), 4);
         assert!(result.removals.iter().all(|r| r.kind == HiddenKind::Bidi));
@@ -513,7 +523,10 @@ mod tests {
         // Two three-byte characters precede it.
         assert_eq!(removal.byte_offset, 6);
         assert_eq!(removal.char_offset, 2);
-        assert_eq!(&input[removal.byte_offset..removal.byte_offset + 3], "\u{200B}");
+        assert_eq!(
+            &input[removal.byte_offset..removal.byte_offset + 3],
+            "\u{200B}"
+        );
         assert!(contains_hidden(input));
         assert!(!contains_hidden(&result.text));
     }

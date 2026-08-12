@@ -63,7 +63,10 @@ fn regular_file_inside_a_root_reads_and_writes() {
         std::fs::write(base.join("work/notes.txt"), b"before").unwrap();
         let g = guard(backend, &[&base.join("work")]);
 
-        assert_eq!(read_all(&g, &base.join("work/notes.txt")).unwrap(), "before");
+        assert_eq!(
+            read_all(&g, &base.join("work/notes.txt")).unwrap(),
+            "before"
+        );
 
         let mut out = g.open_write_create(&base.join("work/notes.txt")).unwrap();
         out.write_all(b"after").unwrap();
@@ -135,7 +138,9 @@ fn symlink_in_root_pointing_outside_is_refused() {
         assert_eq!(err.audit_kind(), "symlink-encountered", "{err}");
 
         // Writing through the link must not create or clobber the target either.
-        let err = g.open_write_create(&base.join("work/link.txt")).unwrap_err();
+        let err = g
+            .open_write_create(&base.join("work/link.txt"))
+            .unwrap_err();
         assert_eq!(err.audit_kind(), "symlink-encountered", "{err}");
         assert_eq!(
             std::fs::read_to_string(base.join("outside.txt")).unwrap(),
@@ -173,7 +178,10 @@ fn symlink_pointing_back_inside_the_root_is_also_refused() {
         let g = guard(backend, &[&base.join("work")]);
 
         // The real path still works.
-        assert_eq!(read_all(&g, &base.join("work/real/f.txt")).unwrap(), "legit");
+        assert_eq!(
+            read_all(&g, &base.join("work/real/f.txt")).unwrap(),
+            "legit"
+        );
         // The aliased path does not.
         let err = read_all(&g, &base.join("work/alias/f.txt")).unwrap_err();
         assert_eq!(err.audit_kind(), "symlink-encountered", "{err}");
@@ -401,7 +409,8 @@ fn both_backends_agree_on_every_refusal() {
         let first = &outcomes[0][i];
         for (b, outcome) in backends.iter().zip(&outcomes) {
             assert_eq!(
-                &outcome[i], first,
+                &outcome[i],
+                first,
                 "{b:?} disagrees about {}",
                 request.display()
             );

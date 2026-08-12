@@ -15,7 +15,12 @@ use wkbd_sec::git_env::GitCommand;
 
 fn raw_git(cwd: &Path, args: &[&str]) -> std::process::Output {
     Command::new("git")
-        .args(["-c", "user.name=wkbd-test", "-c", "user.email=wkbd@example.invalid"])
+        .args([
+            "-c",
+            "user.name=wkbd-test",
+            "-c",
+            "user.email=wkbd@example.invalid",
+        ])
         .args(args)
         .current_dir(cwd)
         .output()

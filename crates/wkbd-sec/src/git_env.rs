@@ -69,7 +69,9 @@ pub enum GitEnvError {
         reason: &'static str,
     },
 
-    #[error("configuration key `{key}` selects a command to execute and cannot be set by a caller")]
+    #[error(
+        "configuration key `{key}` selects a command to execute and cannot be set by a caller"
+    )]
     DangerousConfigKey { key: String },
 
     #[error("no sandbox HOME was set; git must never be able to read the user's HOME")]
@@ -164,10 +166,7 @@ const DENIED_SUBCOMMANDS: &[(&str, &str)] = &[
         "send-email",
         "executes sendemail.* programs and reaches the network",
     ),
-    (
-        "instaweb",
-        "starts a web server named by instaweb.httpd",
-    ),
+    ("instaweb", "starts a web server named by instaweb.httpd"),
     (
         "web--browse",
         "executes the browser named by browser.<b>.cmd",
@@ -303,13 +302,14 @@ impl GitCommand {
             argv.push(OsString::from(format!("{key}={value}")));
         }
         // Last `-c` for a key wins, so the hardening set goes after the caller's.
-        for (key, value) in HARDENING_CONFIG {
-            argv.push(OsString::from("-c"));
-            argv.push(OsString::from(format!("{key}={value}")));
-        }
+        argv.extend(hardening_args());
 
         argv.push(OsString::from(&self.subcommand));
-        argv.extend(implicit_subcommand_flags(&self.subcommand).iter().map(OsString::from));
+        argv.extend(
+            implicit_subcommand_flags(&self.subcommand)
+                .iter()
+                .map(OsString::from),
+        );
         argv.extend(self.args.iter().cloned());
         Ok(argv)
     }
@@ -346,8 +346,9 @@ fn implicit_subcommand_flags(subcommand: &str) -> &'static [&'static str] {
     match subcommand {
         // `diff.<driver>.textconv` runs on a plain `git diff`; `diff.external` and
         // `GIT_EXTERNAL_DIFF` replace the diff machinery outright.
-        "diff" | "show" | "log" | "format-patch" | "diff-tree" | "diff-files"
-        | "diff-index" => &["--no-ext-diff", "--no-textconv"],
+        "diff" | "show" | "log" | "format-patch" | "diff-tree" | "diff-files" | "diff-index" => {
+            &["--no-ext-diff", "--no-textconv"]
+        }
         _ => &[],
     }
 }
@@ -410,7 +411,10 @@ pub fn hardening_args() -> Vec<OsString> {
 /// configured commands.
 pub fn deny_subcommand<S: AsRef<OsStr>>(subcommand: &str, args: &[S]) -> Result<(), GitEnvError> {
     let normalised = subcommand.trim().to_ascii_lowercase();
-    if let Some((_, reason)) = DENIED_SUBCOMMANDS.iter().find(|(name, _)| *name == normalised) {
+    if let Some((_, reason)) = DENIED_SUBCOMMANDS
+        .iter()
+        .find(|(name, _)| *name == normalised)
+    {
         return Err(GitEnvError::DeniedSubcommand {
             subcommand: subcommand.to_string(),
             reason,
@@ -459,8 +463,7 @@ pub fn deny_subcommand<S: AsRef<OsStr>>(subcommand: &str, args: &[S]) -> Result<
 const DANGEROUS_SECTIONS: &[&str] = &[
     // `alias.<name>` starting with `!` is a shell command. (Aliases cannot shadow
     // built-ins, which is the only reason this is not worse.)
-    "alias",
-    // `pager.<cmd>` is a shell pipeline, exactly like core.pager.
+    "alias", // `pager.<cmd>` is a shell pipeline, exactly like core.pager.
     "pager",
 ];
 
@@ -605,9 +608,18 @@ mod tests {
     fn hooks_are_disabled_on_every_invocation() {
         let cmd = GitCommand::new("worktree").unwrap().home("/tmp/h");
         let argv = argv_strings(&cmd);
-        assert!(argv.contains(&"core.hooksPath=/dev/null".to_string()), "{argv:?}");
-        assert!(argv.contains(&"protocol.file.allow=never".to_string()), "{argv:?}");
-        assert!(argv.contains(&"core.symlinks=false".to_string()), "{argv:?}");
+        assert!(
+            argv.contains(&"core.hooksPath=/dev/null".to_string()),
+            "{argv:?}"
+        );
+        assert!(
+            argv.contains(&"protocol.file.allow=never".to_string()),
+            "{argv:?}"
+        );
+        assert!(
+            argv.contains(&"core.symlinks=false".to_string()),
+            "{argv:?}"
+        );
         assert!(argv.contains(&"--no-pager".to_string()), "{argv:?}");
     }
 
@@ -730,10 +742,7 @@ mod tests {
             .home("/tmp/h")
             .args(["--global", "core.pager", "evil"])
             .argv();
-        assert!(matches!(
-            denied,
-            Err(GitEnvError::DeniedArgument { .. })
-        ));
+        assert!(matches!(denied, Err(GitEnvError::DeniedArgument { .. })));
 
         let denied = GitCommand::new("config")
             .unwrap()
@@ -774,7 +783,10 @@ mod tests {
             .unwrap()
             .config("core.pager", "sh -c evil")
             .unwrap_err();
-        assert!(matches!(err, GitEnvError::DangerousConfigKey { .. }), "{err}");
+        assert!(
+            matches!(err, GitEnvError::DangerousConfigKey { .. }),
+            "{err}"
+        );
     }
 
     #[test]

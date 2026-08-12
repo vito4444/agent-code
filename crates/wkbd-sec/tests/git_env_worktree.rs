@@ -15,7 +15,12 @@ use wkbd_sec::git_env::GitCommand;
 
 fn raw_git(cwd: &Path, args: &[&str]) -> std::process::Output {
     let out = Command::new("git")
-        .args(["-c", "user.name=wkbd-test", "-c", "user.email=wkbd@example.invalid"])
+        .args([
+            "-c",
+            "user.name=wkbd-test",
+            "-c",
+            "user.email=wkbd@example.invalid",
+        ])
         .args(args)
         .current_dir(cwd)
         .output()
@@ -104,13 +109,7 @@ fn post_checkout_fires_for_plain_git_and_not_for_a_guarded_invocation() {
         .unwrap()
         .home(&fx.home)
         .current_dir(&fx.repo)
-        .args([
-            "add",
-            "-b",
-            "guarded",
-            guarded_wt.to_str().unwrap(),
-            "HEAD",
-        ])
+        .args(["add", "-b", "guarded", guarded_wt.to_str().unwrap(), "HEAD"])
         .build()
         .unwrap()
         .output()

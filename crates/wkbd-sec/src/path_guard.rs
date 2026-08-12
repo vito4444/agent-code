@@ -55,6 +55,9 @@
 //! agent does not have, and setting the flag would break repositories whose submodules or
 //! build directories live on another filesystem.
 
+// Everything below the error type is unix-only; the Windows stub refuses every call.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 use std::fs::File;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -179,6 +182,7 @@ mod sys {
     // declared here. The struct is extensible: the kernel compares the caller's size
     // against its own and returns E2BIG if any field it does not know about is non-zero,
     // which is why it must be zero-initialised rather than left as uninitialised memory.
+    #[cfg(target_os = "linux")]
     #[repr(C)]
     #[derive(Debug, Default, Clone, Copy)]
     pub(super) struct OpenHow {
@@ -187,8 +191,11 @@ mod sys {
         pub resolve: u64,
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+    #[cfg(target_os = "linux")]
     pub(super) const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+    #[cfg(target_os = "linux")]
     pub(super) const RESOLVE_BENEATH: u64 = 0x08;
 
     /// The whole point of the openat2 backend. `RESOLVE_BENEATH` refuses any resolution
@@ -196,6 +203,7 @@ mod sys {
     /// `RESOLVE_NO_SYMLINKS` refuses every symlink rather than resolving it, and
     /// `RESOLVE_NO_MAGICLINKS` refuses the `/proc/*/fd/*` style links that are not
     /// symlinks and would otherwise slip past the first two.
+    #[cfg(target_os = "linux")]
     pub(super) const STRICT_RESOLVE: u64 =
         RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
 
@@ -400,9 +408,10 @@ impl PathGuard {
                 requested: root.clone(),
                 source,
             })?;
-            let c = sys::cstring(canonical.as_os_str()).ok_or_else(|| GuardError::MalformedPath {
-                requested: canonical.clone(),
-            })?;
+            let c =
+                sys::cstring(canonical.as_os_str()).ok_or_else(|| GuardError::MalformedPath {
+                    requested: canonical.clone(),
+                })?;
             let dir = sys::openat(
                 libc::AT_FDCWD,
                 &c,

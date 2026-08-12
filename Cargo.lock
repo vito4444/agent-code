@@ -2354,10 +2354,41 @@ version = "0.1.0"
 [[package]]
 name = "wkbd-memory"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wkbd-agent",
+ "wkbd-proto",
+ "wkbd-store",
+]
 
 [[package]]
 name = "wkbd-orch"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wkbd-proto",
+ "wkbd-sec",
+ "wkbd-store",
+ "wkbd-vcs",
+]
 
 [[package]]
 name = "wkbd-proto"

@@ -32,7 +32,11 @@ fn read_pid_file(path: &Path) -> u32 {
         "the fixture never wrote its background pid to {}",
         path.display()
     );
-    std::fs::read_to_string(path).unwrap().trim().parse().unwrap()
+    std::fs::read_to_string(path)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
 }
 
 #[test]

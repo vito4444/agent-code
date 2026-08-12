@@ -19,16 +19,21 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use wkbd_agent::{Incoming, ProcessKey, SessionHandle};
 use wkbd_proto::{EventPayload, PendingEvent, StopReason};
-use wkbd_sec::permission::{Decision, PermissionKey, PermissionStore, Scope};
+use wkbd_sec::permission::{hash_decision_content, Decision, PermissionKey, PermissionStore, Scope};
 use wkbd_store::Store;
 
 /// Everything a running turn needs. Deliberately not the whole daemon state: a turn should
 /// not be able to reach the orchestrator or the process pool.
 pub struct TurnContext {
     pub store: Store,
+    /// Publishes persisted events to connected clients. Called only after the append
+    /// succeeds, so a client can never see an event that is not in the log — the log is what
+    /// a reconnecting client resumes from, and an event that exists only in a live stream
+    /// would vanish on reconnect.
+    pub publish: Arc<dyn Fn(&[wkbd_proto::Event]) + Send + Sync>,
     pub session_local_id: String,
     pub handle: Arc<SessionHandle>,
-    pub permissions: Arc<PermissionStore>,
+    pub permissions: Arc<tokio::sync::Mutex<PermissionStore>>,
     pub project_root: String,
     /// Asks the user. Returns the chosen option id, or `None` to cancel. `None` is also
     /// what an unattended daemon returns, which is why the default answer is refusal
@@ -55,19 +60,24 @@ pub async fn run_turn(
     prompt: &str,
     rx: &mut mpsc::UnboundedReceiver<(ProcessKey, Incoming)>,
 ) -> Result<StopReason> {
-    let mut emit = |payloads: Vec<EventPayload>| {
+    let emit = |payloads: Vec<EventPayload>| {
         let store = ctx.store.clone();
         let sid = ctx.session_local_id.clone();
+        let publish = ctx.publish.clone();
         async move {
             if payloads.is_empty() {
                 return;
             }
             let pending: Vec<PendingEvent> =
                 payloads.into_iter().map(|p| PendingEvent::new(sid.clone(), p)).collect();
-            if let Err(e) = store.append(pending).await {
-                // A failed append must not abort the turn: the agent is already working and
-                // losing the log is better than losing the work.
-                tracing::error!(error = %e, "could not persist turn events");
+            match store.append(pending).await {
+                Ok(written) => publish(&written),
+                Err(e) => {
+                    // A failed append must not abort the turn: the agent is already working,
+                    // and losing part of the log is less bad than losing the work. Nothing is
+                    // published in this case, so clients never see an event the log lacks.
+                    tracing::error!(error = %e, "could not persist turn events");
+                }
             }
         }
     };
@@ -180,15 +190,13 @@ async fn handle_permission(ctx: &TurnContext, id: Value, params: Value) -> Vec<E
         .unwrap_or("unknown")
         .to_string();
     let decision_bytes = canonical_decision_bytes(&params);
-    let key = PermissionKey {
-        tool_kind,
-        content_hash: PermissionStore::hash_decision_content(&[&decision_bytes]),
-    };
+    let key = PermissionKey::new(tool_kind, hash_decision_content(&[&decision_bytes]));
+    let scope = Scope::session(ctx.project_root.clone(), ctx.session_local_id.clone());
 
-    let remembered = ctx
-        .permissions
-        .lookup(Scope::Project(ctx.project_root.clone()), &key)
-        .or_else(|| ctx.permissions.lookup(Scope::Global, &key));
+    // `resolve` walks session, then project, then global, and a deny anywhere on that chain
+    // wins. Deny has to be un-overridable by a narrower allow, or "never let anything touch
+    // this path" becomes advisory.
+    let remembered = ctx.permissions.lock().await.lookup(&scope, &key);
 
     let (chosen, auto) = match remembered {
         Some(Decision::Deny) => (None, true),
@@ -214,22 +222,21 @@ async fn handle_permission(ctx: &TurnContext, id: Value, params: Value) -> Vec<E
             // decision on different content asks again.
             if let Some(picked) = &answer {
                 if let Some(opt) = options.iter().find(|o| &o.option_id == picked) {
-                    match opt.kind {
-                        wkbd_proto::PermissionOptionKind::AllowAlways => {
-                            ctx.permissions.remember(
-                                Scope::Project(ctx.project_root.clone()),
-                                key.clone(),
-                                Decision::Allow,
-                            );
-                        }
-                        wkbd_proto::PermissionOptionKind::RejectAlways => {
-                            ctx.permissions.remember(
-                                Scope::Project(ctx.project_root.clone()),
-                                key.clone(),
-                                Decision::Deny,
-                            );
-                        }
-                        _ => {}
+                    let decision = match opt.kind {
+                        wkbd_proto::PermissionOptionKind::AllowAlways => Some(Decision::Allow),
+                        wkbd_proto::PermissionOptionKind::RejectAlways => Some(Decision::Deny),
+                        _ => None,
+                    };
+                    if let Some(decision) = decision {
+                        // Remembered against the project, and against the content hash. The
+                        // same kind of operation on different content asks again, which is
+                        // the property that stops an approved entry being swapped for a
+                        // different payload.
+                        ctx.permissions.lock().await.remember(
+                            Scope::project(ctx.project_root.clone()),
+                            key.clone(),
+                            decision,
+                        );
                     }
                 }
             }
