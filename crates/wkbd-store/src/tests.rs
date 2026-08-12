@@ -266,6 +266,97 @@ fn a_backup_is_written_before_a_schema_change() {
 }
 
 #[test]
+fn widening_the_proposal_states_preserves_existing_rows() {
+    // Migration 5 recreates the proposals table, which is the only way to widen a CHECK
+    // constraint in SQLite and the riskiest kind of migration there is: get the column list
+    // or the ordering wrong and the copy silently shifts data between columns.
+    let dir = TempDir::new().unwrap();
+    {
+        let mut conn = rusqlite::Connection::open(dir.path().join("workbench.db")).unwrap();
+        for m in schema::MIGRATIONS.iter().take_while(|m| m.version <= 4) {
+            conn.execute_batch(m.sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4i64).unwrap();
+        conn.execute(
+            "INSERT INTO proposals
+             (id, kind, scope, body, content_hash, evidence, status, risk,
+              created_ms, decided_ms, approved_hash)
+             VALUES ('p1', 'playbook', '/repo', 'the body', 'deadbeef', 'because',
+                     'approved', 'elevated', 111, 222, 'deadbeef')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let opened = Store::open(dir.path()).unwrap();
+    assert!(opened.degraded.is_none(), "the migration must apply cleanly");
+
+    let conn = opened.store.read_conn().unwrap();
+    let row: (String, String, String, String, String, String, String, String, i64, i64, String, Option<i64>) =
+        conn.query_row(
+            "SELECT id, kind, scope, body, content_hash, evidence, status, risk,
+                    created_ms, decided_ms, approved_hash, applied_ms
+             FROM proposals WHERE id = 'p1'",
+            [],
+            |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
+                    r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?,
+                ))
+            },
+        )
+        .unwrap();
+
+    assert_eq!(row.0, "p1");
+    assert_eq!(row.1, "playbook");
+    assert_eq!(row.2, "/repo");
+    assert_eq!(row.3, "the body");
+    assert_eq!(row.4, "deadbeef");
+    assert_eq!(row.5, "because");
+    assert_eq!(row.6, "approved");
+    assert_eq!(row.7, "elevated");
+    assert_eq!(row.8, 111);
+    assert_eq!(row.9, 222);
+    assert_eq!(row.10, "deadbeef");
+    assert_eq!(row.11, None, "a row that predates the column has not run");
+}
+
+#[tokio::test]
+async fn the_widened_check_accepts_the_new_states_and_still_rejects_nonsense() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+
+    for status in ["applied", "voided", "pending", "approved"] {
+        let s = status.to_string();
+        store
+            .write(move |tx| {
+                tx.execute(
+                    "INSERT INTO proposals
+                     (id, kind, scope, body, content_hash, evidence, status, risk, created_ms)
+                     VALUES (?1, 'k', 's', 'b', 'h', 'e', ?2, 'normal', 1)",
+                    rusqlite::params![s, s],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(|e| panic!("status {status:?} should be accepted: {e}"));
+    }
+
+    let refused = store
+        .write(|tx| {
+            tx.execute(
+                "INSERT INTO proposals
+                 (id, kind, scope, body, content_hash, evidence, status, risk, created_ms)
+                 VALUES ('x', 'k', 's', 'b', 'h', 'e', 'whatever', 'normal', 1)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await;
+    assert!(refused.is_err(), "the CHECK constraint still has to hold");
+}
+
+#[test]
 fn boot_guard_escalates_then_clears() {
     let dir = TempDir::new().unwrap();
 

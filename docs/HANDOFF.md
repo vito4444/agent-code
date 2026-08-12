@@ -70,7 +70,7 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace           # 240 tests
+cargo test --workspace           # 243 tests
 cd ui && pnpm vitest run         # 41 tests
 ./scripts/m0-mergetree.sh        # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh           # 32 assertions across the whole slice
@@ -272,6 +272,14 @@ One leak worth naming: repository history is readable from inside a worktree and
 across worktrees. If an answer exists in a branch or a reflog, an agent can find it without
 touching a test file.
 
+### 4.13b Proposal terminal states are distinguishable
+
+`applied` and `voided` are separate states. Both previously retired to `superseded`, which
+folded a security-relevant event into a housekeeping one: a proposal whose bytes changed after
+approval is the exact shape of a known vulnerability, and it has to be visible as itself rather
+than as "something newer came along". Migration 5 recreates the table to widen the constraint,
+which is the only way to do it in SQLite, and a test asserts every column survives the copy.
+
 ### 4.14 The playbook has no rewrite operation
 
 Deltas are `Add`, `Update`, `Deprecate`. There is no variant for replacing the document, because
@@ -415,7 +423,17 @@ Everything here is either untested or rests on a source rather than a measuremen
   reproduced here.
 - The claim that only-read tests reduce test tampering to near zero comes from a cited benchmark,
   not from our own measurement.
-- `wkbd-sec`'s Windows paths are unimplemented and untested.
+- `wkbd-sec`'s Windows paths are unimplemented and untested. They typecheck for the
+  `x86_64-pc-windows-msvc` target and nothing more.
+- **`wkbd-sec`'s boot-side orphan sweep does nothing on macOS.** `ProcessIdentity` cannot read
+  an executable name or a start time there, so `matches()` always returns false and no
+  recorded process is ever killed. That is deliberately the fail-safe direction — not killing
+  beats killing a stranger's process that inherited the id — but it means the third layer of
+  process cleanup is currently absent on macOS and needs `proc_pidinfo`.
+- The macOS and Windows code paths in `wkbd-sec` have only been typechecked. In particular the
+  descriptor-walking path guard fallback, which is the only backend on macOS, has never
+  executed: `openat2` exists on this kernel, so every test took the fast path plus an
+  explicitly forced walk, and the "probe says unavailable, so choose walk" branch is untaken.
 - The `--stdin` mode of `git merge-tree` was measured but is not used; the inverted status
   semantics are recorded in [M0-FINDINGS.md](M0-FINDINGS.md) in case someone reaches for it.
 - Load has not been characterized. The store's write path is tested for correctness under

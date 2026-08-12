@@ -60,7 +60,7 @@ cd ui && pnpm dev     # proxies /api, WebSocket included
 ## Checks
 
 ```bash
-cargo test --workspace       # 240 tests
+cargo test --workspace       # 243 tests
 cd ui && pnpm vitest run     # 41 tests
 ./scripts/m0-mergetree.sh    # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh       # 32 assertions across the whole slice

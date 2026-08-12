@@ -83,7 +83,16 @@ pub enum Status {
     Pending,
     Approved,
     Rejected,
-    /// Terminal. Either applied, or the approval was voided because the content changed.
+    /// Terminal: the payload ran.
+    Applied,
+    /// Terminal: the approval was voided because the content changed after it was given.
+    ///
+    /// Distinct from [`Status::Applied`] and from [`Status::Superseded`] on purpose. A
+    /// proposal whose bytes changed after approval is the exact shape of a known
+    /// vulnerability, and folding it into a housekeeping state hides the one event most
+    /// worth seeing.
+    Voided,
+    /// Terminal: something newer replaced it before it ran.
     Superseded,
     Expired,
 }
@@ -94,6 +103,8 @@ impl Status {
             Status::Pending => "pending",
             Status::Approved => "approved",
             Status::Rejected => "rejected",
+            Status::Applied => "applied",
+            Status::Voided => "voided",
             Status::Superseded => "superseded",
             Status::Expired => "expired",
         }
@@ -103,6 +114,8 @@ impl Status {
         match s {
             "approved" => Status::Approved,
             "rejected" => Status::Rejected,
+            "applied" => Status::Applied,
+            "voided" => Status::Voided,
             "superseded" => Status::Superseded,
             "expired" => Status::Expired,
             _ => Status::Pending,
@@ -671,9 +684,8 @@ pub async fn apply(store: &Store, id: &str) -> Result<Applied> {
     let payload: ProposalPayload = serde_json::from_str(&proposal.body)?;
     let applied = execute(store, payload).await?;
 
-    // The schema has no `applied` state, so a proposal that has run is retired to
-    // `superseded`; leaving it `approved` would let the same approval be replayed, and
-    // apply cannot assume every payload is idempotent.
+    // Retired to `applied`, not left `approved`: an approval that stays live can be
+    // replayed, and apply cannot assume every payload is idempotent.
     retire(store, &proposal.id).await?;
     Ok(applied)
 }
@@ -712,7 +724,7 @@ async fn void_approval(store: &Store, id: &str) -> Result<()> {
     store
         .write(move |tx| {
             tx.execute(
-                "UPDATE proposals SET status = 'superseded', approved_hash = NULL,
+                "UPDATE proposals SET status = 'voided', approved_hash = NULL,
                         decided_ms = ?2
                  WHERE id = ?1",
                 rusqlite::params![id, now],
@@ -727,8 +739,8 @@ async fn retire(store: &Store, id: &str) -> Result<()> {
     store
         .write(move |tx| {
             tx.execute(
-                "UPDATE proposals SET status = 'superseded' WHERE id = ?1",
-                rusqlite::params![id],
+                "UPDATE proposals SET status = 'applied', applied_ms = ?2 WHERE id = ?1",
+                rusqlite::params![id, wkbd_store::now_ms()],
             )?;
             Ok(())
         })
@@ -923,8 +935,14 @@ mod tests {
 
             // The approval is gone, not merely unused: a second attempt cannot succeed,
             // and re-approving requires a fresh decision on the new content.
+            //
+            // The terminal state is `Voided` and not `Applied` or `Superseded`. A proposal
+            // whose bytes changed after approval is the shape of a known vulnerability, and
+            // it has to be distinguishable from one that ran and one that was replaced,
+            // otherwise the single most interesting event in this table is invisible.
             let after = load(&store, &proposal.id).await.unwrap();
-            assert_eq!(after.status, Status::Superseded);
+            assert_eq!(after.status, Status::Voided);
+            assert_ne!(after.status, Status::Applied);
             assert_eq!(after.approved_hash, None);
             assert!(matches!(
                 refusal(apply(&store, &proposal.id).await.unwrap_err()),
@@ -973,10 +991,11 @@ mod tests {
         assert!(matches!(applied, Applied::Playbook { .. }));
         assert_eq!(playbook::list(&store, SCOPE).await.unwrap().len(), 1);
 
-        // Applied once. The retired proposal cannot be replayed.
+        // Applied once. The retired proposal cannot be replayed, and its terminal state says
+        // that it ran rather than that something replaced it.
         assert!(matches!(
             refusal(apply(&store, &proposal.id).await.unwrap_err()),
-            Refusal::NotApproved { status: "superseded", .. }
+            Refusal::NotApproved { status: "applied", .. }
         ));
     }
 

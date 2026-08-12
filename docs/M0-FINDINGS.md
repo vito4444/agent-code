@@ -83,6 +83,31 @@ Consequence: path ownership is a scheduling heuristic only. `merge-tree` is the 
 authority on whether two results combine. Implemented in
 `wkbd-vcs::merge::predict_merge`.
 
+### 1.3b An error also exits 1, and conflict filenames are quoted
+
+Two further behaviours measured while building `wkbd-vcs`, neither of which is in the
+documentation.
+
+**A bad ref exits 1, exactly like a conflict.**
+
+```
+$ git merge-tree --write-tree $X nosuchref
+exit_code=1
+stdout: (empty)
+stderr: merge-tree: nosuchref - not something we can merge
+```
+
+Reading exit code 1 as "these branches conflict" therefore turns a typo into "these two
+branches can never be merged", which the orchestrator would answer by replanning forever. The
+parser requires the first line to be a valid object id and reports an error otherwise;
+regression test `an_unknown_ref_is_an_error_not_a_conflict`.
+
+**Filenames in the conflict section are C-quoted.** A non-ASCII name came out as
+`"unic\303\266de-\345\220\215前.txt"`. Adding `-c core.quotePath=false` handles the
+non-ASCII case, but a name containing a quote or a backslash is still wrapped and escaped:
+`we"ird\back.txt` becomes `"we\"ird\\back.txt"`. Both are handled — the config plus a
+C-unquote that reassembles octal byte escapes.
+
 ### 1.4 The full dependency-edge mechanism works
 
 ```

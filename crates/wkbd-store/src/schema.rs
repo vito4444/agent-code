@@ -300,6 +300,47 @@ CREATE TABLE routing_arms (
 );
 "#,
     },
+    Migration {
+        version: 5,
+        name: "proposal_terminal_states",
+        sql: r#"
+-- Separates "this ran" from "the approval was voided because the content changed".
+--
+-- Both previously retired to `superseded`, which folded a security-relevant event into a
+-- housekeeping one: a proposal whose bytes changed after approval is the exact shape of a
+-- known vulnerability, and it has to be visible as itself rather than as "something newer
+-- came along". Recreating the table is the only way to widen a CHECK constraint in SQLite.
+CREATE TABLE proposals_new (
+    id            TEXT PRIMARY KEY,
+    kind          TEXT NOT NULL,
+    scope         TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    evidence      TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','approved','rejected','superseded',
+                                      'expired','applied','voided')),
+    risk          TEXT NOT NULL DEFAULT 'normal'
+                    CHECK (risk IN ('normal','elevated')),
+    created_ms    INTEGER NOT NULL,
+    decided_ms    INTEGER,
+    approved_hash TEXT,
+    -- When the payload actually took effect. Null for everything that never ran.
+    applied_ms    INTEGER
+);
+
+INSERT INTO proposals_new
+    (id, kind, scope, body, content_hash, evidence, status, risk,
+     created_ms, decided_ms, approved_hash, applied_ms)
+SELECT id, kind, scope, body, content_hash, evidence, status, risk,
+       created_ms, decided_ms, approved_hash, NULL
+FROM proposals;
+
+DROP TABLE proposals;
+ALTER TABLE proposals_new RENAME TO proposals;
+CREATE INDEX idx_proposals_status ON proposals(status, created_ms);
+"#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> rusqlite::Result<i64> {
