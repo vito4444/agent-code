@@ -46,6 +46,45 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Adds the built interface to a router.
+///
+/// The daemon serves the interface as well as the API, from one origin. During development Vite
+/// serves the assets and proxies the API here, and in a packaged build this serves both — the same
+/// request URLs either way, so the code that runs in a browser and the code that runs in the desktop
+/// shell are the same code.
+///
+/// The alternative is what the shell tried first: assets from the webview's own protocol, API over
+/// HTTP. That gives the two halves different origins, and then every cross-origin question — cookies,
+/// WebSocket upgrade, CSP — has to be answered a second time, for the platform that is hardest to
+/// test.
+///
+/// Unknown paths fall back to `index.html` rather than 404ing, because the interface routes
+/// client-side: a reload on any screen other than the first would otherwise land on a 404.
+pub fn with_interface(router: Router, dist: &std::path::Path) -> Router {
+    use tower_http::services::{ServeDir, ServeFile};
+    let index = dist.join("index.html");
+    router.fallback_service(ServeDir::new(dist).fallback(ServeFile::new(index)))
+}
+
+/// Where the built interface is, if it is anywhere.
+///
+/// Beside the binary first, because that is where a packaged build puts it. `ui/dist` relative to the
+/// working directory second, for running from a checkout. Returning `None` rather than a guess: the
+/// API has to keep working when the interface was never built, and a router with a fallback pointing
+/// at a directory that does not exist answers every unknown path with a confusing 500 instead of a
+/// 404.
+pub fn find_interface() -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("ui"));
+            candidates.push(dir.join("../ui/dist"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from("ui/dist"));
+    candidates.into_iter().find(|p| p.join("index.html").is_file())
+}
+
 async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(json!({
         "ok": true,

@@ -466,17 +466,22 @@ nothing appears outside it.
   Until then every capability defaults to absent, which is the right default but means the
   degraded paths are the tested ones and the rich paths are not.
 
-- **The Linux WebKitGTK stress spike was not run.** The risk is GPU and compositor specific; this
-  machine has no GPU, no Wayland session and no `webkit2gtk`. Running it under software rendering
-  would exercise precisely the configuration that does not reproduce the failure, and a green
-  result would be actively misleading. Required before claiming the Tauri shell is usable on
-  Linux. Mitigation already in place: the browser path is first class, and the terminal renderer
-  defaults to canvas rather than WebGL.
+- **The Linux WebKitGTK stress spike was not run.** Part of the reasoning here was wrong and is
+  corrected in `docs/reference/shell/README.md`: `webkit2gtk` *is* available, and the shell runs —
+  there are screenshots. What has not been done is the part the spike was for. The reported failures
+  are GPU and compositor specific, and this machine has no GPU and no Wayland session, so everything
+  observed here ran under software rendering with compositing disabled. That is precisely the
+  configuration in which the failure does not reproduce, so "it worked here" is not evidence that it
+  works on a real desktop, and reporting it as such would be worse than reporting nothing. Still
+  required before claiming the shell is usable on Linux generally. Mitigation already in place: the
+  browser path is first class — the daemon serves the interface itself, so Chrome is a working escape
+  route rather than a rewrite — and the terminal renderer defaults to canvas rather than WebGL.
 
 ### Not started
 
-- **The Tauri shell.** The daemon and interface are complete and the interface is served over
-  HTTP; the desktop shell around it is not written. It cannot be built here — no `webkit2gtk`.
+- ~~**The Tauri shell.**~~ Written and running. See `docs/reference/shell/` for screenshots taken on
+  this machine and for two claims in this document that turned out to be wrong — including the one
+  that said it could not be built here.
 - **A full-screen review surface.** Inline diffs link to one that does not exist.
 - **Terminal support.** `terminal/*` is refused. Embedded terminal content reports that rather
   than showing output.

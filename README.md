@@ -132,3 +132,23 @@ operation actually is. One changed byte asks again.
 ## License
 
 Apache-2.0.
+
+## The desktop shell
+
+```bash
+cd ui && pnpm build          # the daemon serves this; without it there is nothing to open
+cd desktop && cargo build
+./target/debug/wkbd-desktop -- --agent "rich=Rich=/path/to/agent --profile rich"
+```
+
+Everything after `--` goes to the daemon untouched, so the shell never needs to grow a duplicate of
+a daemon flag — a duplicate would be the copy that falls behind, and a silently dropped flag looks
+like a daemon ignoring its configuration.
+
+It needs `libwebkit2gtk-4.1-dev` and `libgtk-3-dev` on Linux. Screenshots of it running, and the
+three mistakes made getting there, are in [`docs/reference/shell/`](docs/reference/shell/).
+
+The shell is thin on purpose: it starts the daemon, waits for it to answer, and points a webview at
+it. Nothing in that process is testable without a display, so anything that moves in there stops
+being covered. If the daemon will not start, the window still opens and shows the log path —
+an application that cannot open cannot be used to find out why it cannot open.

@@ -266,16 +266,25 @@ async fn main() -> Result<()> {
     }
 
     let mut app = api::router(app_state.clone());
-    if let Some(ui_dir) = &cli.ui_dir {
-        if ui_dir.is_dir() {
-            app = app.fallback_service(
-                tower_http::services::ServeDir::new(ui_dir)
-                    .fallback(tower_http::services::ServeFile::new(ui_dir.join("index.html"))),
-            );
-            tracing::info!(dir = %ui_dir.display(), "serving the interface");
-        } else {
-            tracing::warn!(dir = %ui_dir.display(), "interface directory does not exist");
+
+    // Found rather than required. `--ui-dir` used to be the only way to serve the interface, which
+    // meant a caller that did not know to pass it got a daemon answering 404 on every path except
+    // `/api/*` — and a desktop shell pointed at it showed a white window with nothing anywhere
+    // saying why. That is what happened the first time this was tried, because the shell asserted in
+    // a comment that the daemon served the interface, and nothing had ever checked.
+    match cli.ui_dir.clone().or_else(api::find_interface) {
+        Some(dist) if dist.join("index.html").is_file() => {
+            tracing::info!(path = %dist.display(), "serving the interface");
+            app = api::with_interface(app, &dist);
         }
+        Some(dist) => tracing::warn!(
+            path = %dist.display(),
+            "that directory has no index.html; serving the API only"
+        ),
+        None => tracing::warn!(
+            "no built interface found; the API is up but there is nothing to open in a browser. \
+             Build it with `cd ui && pnpm build`."
+        ),
     }
 
     let addr: SocketAddr = cli.listen.parse().context("parsing --listen")?;
