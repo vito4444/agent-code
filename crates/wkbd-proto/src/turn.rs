@@ -102,6 +102,10 @@ pub struct ViewBuilder {
     /// Every file access attempted on the agent's behalf, allowed or not. The audit trail for
     /// the one interface where an unsandboxed process acts for a sandboxed one.
     pub file_accesses: Vec<FileAccessRecord>,
+    /// Orchestration events, which arrive on their own stream and are collected rather than
+    /// folded into turns: a run is not a conversation and forcing it into one would misrepresent
+    /// both.
+    pub run_events: Vec<RunEvent>,
 }
 
 impl ViewBuilder {
@@ -288,6 +292,7 @@ impl ViewBuilder {
                     t.items.push(TurnItem::Error { message: message.clone() });
                 }
             }
+            EventPayload::Run { run } => self.run_events.push(run.clone()),
             EventPayload::FileAccess {
                 op,
                 requested,

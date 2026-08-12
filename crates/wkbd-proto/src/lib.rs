@@ -10,6 +10,7 @@ pub mod normalize;
 pub mod turn;
 
 pub use event::*;
+pub use event::{run_stream_id, RunEvent, RunStatus, TaskStatus, TaskSummary};
 pub use normalize::{max_concurrent_live, Normalizer, RawUpdate};
 pub use turn::{
     FileAccessRecord, SegmentView, ToolCallView, TurnItem, TurnView, ViewBuilder,

@@ -46,6 +46,11 @@ pub enum Profile {
     Flood,
     /// Exits mid-turn, leaving the prompt request unanswered.
     Crash,
+    /// Does the work a task asks for by writing the file named in the prompt.
+    ///
+    /// Reads the prompt for `WRITE <path> <<<content>>>` directives and performs them through the
+    /// client, so an orchestrated run really produces file changes, real commits and a real merge.
+    Worker,
     /// Exercises client-side file access, including four attempts to leave the workspace.
     ///
     /// The escapes are the point. A path guard with passing unit tests says the guard is correct;
@@ -67,6 +72,7 @@ impl std::str::FromStr for Profile {
             "flood" => Profile::Flood,
             "crash" => Profile::Crash,
             "fsprobe" => Profile::FsProbe,
+            "worker" => Profile::Worker,
             other => return Err(format!("unknown profile: {other}")),
         })
     }
@@ -151,6 +157,9 @@ impl Profile {
                 Step::Die,
             ],
             Profile::FsProbe => fs_probe(),
+            // Built from the prompt rather than fixed, because the point of this profile is that
+            // the run's own graph decides what happens.
+            Profile::Worker => worker(prompt),
         }
     }
 }
@@ -215,6 +224,38 @@ fn fs_probe() -> Vec<Step> {
         },
         Step::Emit(message(Some("m3"), "finished probing")),
     ]
+}
+
+/// Performs the `WRITE <path> <<<content>>>` directives in a task body.
+///
+/// Deliberately mechanical. What the end-to-end test needs to establish is that the orchestrator
+/// creates real isolation, transports real work across dependency edges and produces real commits;
+/// none of that is affected by whether the agent doing the work was clever. An agent whose output
+/// varies would make the test unable to distinguish "the orchestrator is wrong" from "the agent
+/// chose differently this time".
+fn worker(prompt: &str) -> Vec<Step> {
+    let mut steps = vec![Step::Emit(thought(Some("m1"), "reading the task"))];
+    let mut wrote = 0;
+
+    for directive in prompt.split("WRITE ").skip(1) {
+        let Some((path, rest)) = directive.split_once(" <<<") else { continue };
+        let Some((content, _)) = rest.split_once(">>>") else { continue };
+        let path = path.trim();
+        // Relative to the worktree, so the same task body works in whichever worktree it lands in.
+        // An absolute path would make the graph depend on where the test put the repository.
+        steps.push(Step::Request {
+            method: "fs/write_text_file".into(),
+            params: json!({ "path": format!("{{ROOT}}/{path}"), "content": content }),
+            label: format!("write-{path}"),
+        });
+        wrote += 1;
+    }
+
+    steps.push(Step::Emit(message(
+        Some("m2"),
+        &format!("wrote {wrote} file(s)"),
+    )));
+    steps
 }
 
 pub fn thought(message_id: Option<&str>, text: &str) -> Value {

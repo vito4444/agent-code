@@ -53,10 +53,30 @@ pub struct AppState {
     pub agents: Vec<AgentSpec>,
     pub sessions: RwLock<HashMap<String, Arc<LiveSession>>>,
     /// Maps the agent's own session id to our local id, for demultiplexing.
-    pub acp_to_local: RwLock<HashMap<String, String>>,
+    /// Agent-assigned session id to our own, keyed by the process it came from.
+    ///
+    /// The process has to be part of the key. Session ids are assigned by the agent and the protocol
+    /// says nothing about them being unique beyond one conversation — in practice an agent numbers
+    /// them from one per process, so two processes of the same agent both call their first session
+    /// `session-1`. Keyed on the id alone, the second registration silently replaces the first and
+    /// every message from both processes is delivered to whichever session registered last. What
+    /// that looks like from outside is one task's file write being checked against another task's
+    /// workspace and refused for leaving a boundary it never approached.
+    ///
+    /// Two processes of one agent needs two concurrent sessions with different launch settings,
+    /// which is exactly what the orchestrator does and exactly what no single-session test creates.
+    pub acp_to_local: RwLock<HashMap<(ProcessKey, String), String>>,
     pub events: broadcast::Sender<Event>,
     pub raw: Mutex<Vec<InspectorFrame>>,
     pub degraded: Option<String>,
+    /// The orchestrator, when a worker agent is configured. `None` means the run endpoints report
+    /// that rather than accepting a run they cannot execute — an accepted run with nothing to
+    /// execute it is worse than a refusal, because the user waits for it.
+    ///
+    /// Behind a lock because the engine holds an `Arc<AppState>` and so cannot be built before the
+    /// state it points at exists. The alternative is a weak reference threaded through every call
+    /// site, for a value that is written exactly once at startup.
+    pub runs: std::sync::Mutex<Option<Arc<crate::run::RunEngine>>>,
     /// Whether to offer `fs/*` to agents. On by default: an agent that cannot ask us reads the
     /// file itself, outside any boundary we can enforce and outside the audit log.
     pub offer_client_fs: bool,
@@ -76,6 +96,14 @@ impl AppState {
 
     pub async fn session(&self, local_id: &str) -> Option<Arc<LiveSession>> {
         self.sessions.read().await.get(local_id).cloned()
+    }
+
+    pub fn runs(&self) -> Option<Arc<crate::run::RunEngine>> {
+        self.runs.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn set_runs(&self, engine: Arc<crate::run::RunEngine>) {
+        *self.runs.lock().unwrap_or_else(|e| e.into_inner()) = Some(engine);
     }
 
     pub async fn open_session(
@@ -139,10 +167,13 @@ impl AppState {
         });
 
         let local_id = session.handle.local_id.clone();
-        self.acp_to_local
-            .write()
-            .await
-            .insert(session.handle.acp_session_id.clone(), local_id.clone());
+        self.acp_to_local.write().await.insert(
+            (
+                session.handle.process_key.clone(),
+                session.handle.acp_session_id.clone(),
+            ),
+            local_id.clone(),
+        );
         self.sessions.write().await.insert(local_id.clone(), session.clone());
 
         // The options the agent declared at `session/new` have to reach the client as an event.
@@ -241,6 +272,7 @@ impl AppState {
 
     /// Routes one inbound message to the session it belongs to.
     async fn route(&self, key: ProcessKey, msg: Incoming) {
+        let read_seq = msg.read_seq();
         let acp_session_id = match &msg {
             Incoming::Notification { params, .. } | Incoming::Request { params, .. } => params
                 .get("sessionId")
@@ -249,14 +281,27 @@ impl AppState {
         };
 
         let local = match acp_session_id {
-            Some(acp) => self.acp_to_local.read().await.get(&acp).cloned(),
+            Some(acp) => self
+                .acp_to_local
+                .read()
+                .await
+                .get(&(key.clone(), acp))
+                .cloned(),
             None => None,
         };
 
+        // The watermark is advanced for every message, including one we could not attribute and
+        // one whose session has gone. A turn waiting for "everything before my response" is waiting
+        // on the read position, and a position that never advances because a line belonged to
+        // nobody would stall that turn until its timeout.
+        let mut connection = None;
         match local {
             Some(local) => {
                 if let Some(session) = self.sessions.read().await.get(&local) {
+                    // Sent before the watermark moves, so a waiter that sees the watermark finds the
+                    // message already in its queue rather than still on its way there.
                     let _ = session.inbox_tx.send(msg);
+                    connection = Some(session.handle.connection());
                 }
             }
             None => {
@@ -268,6 +313,22 @@ impl AppState {
                     "inbound message with no matching session; dropping"
                 );
             }
+        }
+
+        // An unattributable message still has to move the watermark, and the connection it arrived
+        // on is the one every session sharing that process is waiting on.
+        let connection = match connection {
+            Some(c) => Some(c),
+            None => self
+                .sessions
+                .read()
+                .await
+                .values()
+                .find(|s| s.handle.process_key == key)
+                .map(|s| s.handle.connection()),
+        };
+        if let Some(conn) = connection {
+            conn.note_routed(read_seq);
         }
     }
 }

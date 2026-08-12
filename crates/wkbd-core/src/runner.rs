@@ -59,8 +59,8 @@ pub trait AskUser: Send + Sync {
 
 /// Awaits a permission answer. `None` means refuse.
 pub struct PermissionWaiter {
-    rx: tokio::sync::oneshot::Receiver<Option<String>>,
-    timeout: std::time::Duration,
+    pub(crate) rx: tokio::sync::oneshot::Receiver<Option<String>>,
+    pub(crate) timeout: std::time::Duration,
 }
 
 impl PermissionWaiter {
@@ -197,7 +197,28 @@ pub async fn run_turn(
     // Waiting on the read position rather than on a timer makes this deterministic: we know
     // exactly how many lines came before the response, so we know when we have them all.
     if let Some(target) = response_read_seq {
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        // Wait on the connection's delivery watermark rather than on our own progress. One agent
+        // process serves several sessions — the pool keys on agent plus launch settings, not on
+        // session — so the lines between our last notification and our response can belong to
+        // somebody else entirely. Measuring our own progress against a position on the shared
+        // stream then waits for messages that will never arrive in our inbox, and every turn pays
+        // the full timeout. That failure needs two concurrent sessions on one process to appear,
+        // which is why it survived a suite that opens one at a time.
+        if !ctx
+            .handle
+            .connection()
+            .wait_routed(target, std::time::Duration::from_secs(10))
+            .await
+        {
+            tracing::warn!(target, "timed out waiting for the stream to catch up to the response");
+        }
+        // Everything up to the response has been placed in some session's inbox, so anything of
+        // ours is already queued and this drain cannot block.
+        while let Ok(msg) = rx.try_recv() {
+            highest_processed = highest_processed.max(msg.read_seq());
+            emit(handle_incoming(ctx, msg).await).await;
+        }
+        let deadline = tokio::time::Instant::now();
         while highest_processed < target && !agent_gone {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
@@ -453,3 +474,38 @@ fn canonical_decision_bytes(params: &Value) -> Vec<u8> {
     }
     parts.join("\u{1f}").into_bytes()
 }
+
+/// Answers a worker's permission requests without asking anyone.
+///
+/// Necessary and worth being blunt about. A worker dispatched by the orchestrator has nobody
+/// watching it: waiting for a human would stall every parallel run on its first tool call, and the
+/// wait would time out into a refusal, so "ask" and "refuse everything" are the same policy in
+/// practice. Refusing everything makes a worker that cannot do its job.
+///
+/// So what actually constrains a worker is not the prompt. It is the worktree it runs in, the path
+/// guard rooted at that worktree, and the acceptance check on its output. Those hold whether or not
+/// it was asked. The prompt is a UI affordance for an interactive session, and treating it as a
+/// security boundary for an unattended one would be believing a check that nobody is performing.
+///
+/// Every request still reaches the event log through the normal path, so a run's transcript shows
+/// what was asked and that it was allowed automatically.
+pub struct AutoAllow;
+
+#[async_trait::async_trait]
+impl AskUser for AutoAllow {
+    async fn register(&self, _request_id: &str) -> PermissionWaiter {
+        // Answered before it is awaited, so the worker never blocks. `None` would mean refuse.
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let _ = tx.send(Some(AUTO_ALLOW_OPTION.to_string()));
+        PermissionWaiter { rx, timeout: std::time::Duration::from_secs(1) }
+    }
+
+    async fn cancel(&self, _request_id: &str) {}
+}
+
+/// The option id reported for an automatic allowance.
+///
+/// A distinct, obviously-not-a-user string rather than reusing whatever the agent offered: a
+/// transcript reader has to be able to tell an automatic decision from one a person made, and a
+/// remembered decision that came from nobody must never be replayed as though somebody chose it.
+pub const AUTO_ALLOW_OPTION: &str = "wkbd:auto-allow-unattended";

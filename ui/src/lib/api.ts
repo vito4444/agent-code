@@ -8,7 +8,7 @@
  */
 
 import type { Rule } from '../components/rules/RulesScreen';
-import type { SessionSummary } from './types';
+import type { RunSummary, SessionSummary } from './types';
 
 const base = '/api';
 
@@ -22,6 +22,24 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
   return (await res.json()) as T;
+}
+
+/**
+ * A call whose success is the status code.
+ *
+ * An accepted request with an empty body is not a JSON document, and parsing it as one turns a
+ * request that worked into an error the user is shown.
+ */
+async function accepted(path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
 }
 
 export function listSessions(): Promise<SessionSummary[]> {
@@ -66,6 +84,45 @@ export function setConfigOption(
     method: 'POST',
     body: JSON.stringify({ option_id: optionId, value }),
   });
+}
+
+export async function listRuns(): Promise<RunSummary[]> {
+  const body = await json<{ runs: RunSummary[] }>('/runs');
+  return body.runs;
+}
+
+/**
+ * Starts a run.
+ *
+ * Answers with an id and nothing else: the run is accepted, not finished, and the planner has
+ * not drafted anything yet. Everything a screen wants to show arrives on the run's event
+ * stream, so a fuller response here would only be state that can already be stale.
+ */
+export function createRun(goal: string, projectRoot: string): Promise<{ id: string }> {
+  return json('/runs', {
+    method: 'POST',
+    body: JSON.stringify({ goal, project_root: projectRoot }),
+  });
+}
+
+/**
+ * Combines the candidate into the project.
+ *
+ * A separate call rather than something the orchestrator does when acceptance passes. Passing
+ * the assertions a task named is not evidence that the change is the one that was asked for,
+ * and the gate exists so that judgement happens once, here, with a name attached to it.
+ */
+export function mergeRun(runId: string): Promise<{ commit: string }> {
+  return json(`/runs/${encodeURIComponent(runId)}/merge`, { method: 'POST' });
+}
+
+/** Throws the candidate away. The task branches stay, so the work is recoverable by hand. */
+export function abandonRun(runId: string): Promise<void> {
+  return accepted(`/runs/${encodeURIComponent(runId)}/abandon`);
+}
+
+export function cancelRun(runId: string): Promise<void> {
+  return accepted(`/runs/${encodeURIComponent(runId)}/cancel`);
 }
 
 export function fetchTerminalOutput(

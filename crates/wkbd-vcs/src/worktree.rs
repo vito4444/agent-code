@@ -578,3 +578,57 @@ mod tests {
         assert_eq!(parsed[0].path, PathBuf::from("/tmp/wt feat"));
     }
 }
+
+/// Commits everything an agent changed in its worktree, and reports the commit.
+///
+/// The merge machinery works on commits, not on working trees: `merge-tree` reads objects, and a
+/// dirty worktree has nothing for it to read. So a task's result has to become a commit before it
+/// can be combined with anything, and this is where that happens.
+///
+/// Returns `None` when there was nothing to commit. That is not an error — an agent can legitimately
+/// decide a task needs no change — but it is also indistinguishable from an agent that did nothing,
+/// which is why it is reported rather than turned into an empty commit that hides the difference.
+///
+/// The author identity is supplied rather than inherited. A daemon can easily be running somewhere
+/// `user.email` was never configured, and there git refuses to commit at all: the run would fail at
+/// the last step, after all the work, for a reason that has nothing to do with the work.
+pub fn commit_all(
+    worktree: &Path,
+    message: &str,
+    identity: &crate::merge::Identity,
+) -> Result<Option<String>> {
+    // `add -A` rather than `add .`: the latter misses deletions in some git versions, and a task
+    // that deletes a file would silently produce a commit that still contains it.
+    let add = git::run(worktree, &["add", "-A"])?;
+    if !add.success() {
+        return Err(add.error());
+    }
+
+    let staged = git::run(worktree, &["diff", "--cached", "--name-only", "-z"])?;
+    if !staged.success() {
+        return Err(staged.error());
+    }
+    if staged.nul_fields()?.is_empty() {
+        return Ok(None);
+    }
+
+    let out = git::run_with_env(
+        worktree,
+        &["commit", "--no-verify", "--no-gpg-sign", "-m", message],
+        &[
+            ("GIT_AUTHOR_NAME", identity.name.as_str()),
+            ("GIT_AUTHOR_EMAIL", identity.email.as_str()),
+            ("GIT_COMMITTER_NAME", identity.name.as_str()),
+            ("GIT_COMMITTER_EMAIL", identity.email.as_str()),
+        ],
+    )?;
+    if !out.success() {
+        return Err(out.error());
+    }
+
+    let head = git::run(worktree, &["rev-parse", "HEAD"])?;
+    if !head.success() {
+        return Err(head.error());
+    }
+    Ok(Some(head.stdout_trimmed()?.to_string()))
+}

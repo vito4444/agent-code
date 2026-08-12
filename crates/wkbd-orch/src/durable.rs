@@ -26,6 +26,14 @@ pub enum RunStatus {
     Planning,
     Running,
     Blocked,
+    /// Finished successfully and waiting for a human to merge.
+    ///
+    /// Not `Blocked`, which it superficially resembles. A blocked run has a dependency that failed
+    /// and there is nothing anyone can do; this one succeeded and is waiting on a decision. Recovery
+    /// treats them oppositely — one is over, the other must not be restarted — and a status that
+    /// cannot tell them apart will either re-run finished work or throw away a candidate somebody
+    /// was about to accept.
+    AwaitingMerge,
     Done,
     Failed,
     Cancelled,
@@ -37,6 +45,7 @@ impl RunStatus {
             RunStatus::Planning => "planning",
             RunStatus::Running => "running",
             RunStatus::Blocked => "blocked",
+            RunStatus::AwaitingMerge => "awaiting_merge",
             RunStatus::Done => "done",
             RunStatus::Failed => "failed",
             RunStatus::Cancelled => "cancelled",
@@ -47,6 +56,7 @@ impl RunStatus {
         match s {
             "planning" => RunStatus::Planning,
             "blocked" => RunStatus::Blocked,
+            "awaiting_merge" => RunStatus::AwaitingMerge,
             "done" => RunStatus::Done,
             "failed" => RunStatus::Failed,
             "cancelled" => RunStatus::Cancelled,
@@ -254,9 +264,16 @@ impl Workflow {
 pub async fn unfinished_runs(store: &Store) -> Result<Vec<String>> {
     store
         .read(|conn| {
+            // `awaiting_merge` is excluded even though it is not a terminal status. That run is
+            // not waiting on us, it is waiting on a person, and re-driving it would walk every
+            // checkpoint again and append a second copy of the "here is your candidate" event —
+            // so the reader would see two candidates and have to work out that they are the same
+            // one. The distinction only exists because the status does; folding it into `blocked`
+            // would make this query unable to tell "nothing more can happen" from "somebody has
+            // a decision to make".
             let mut stmt = conn.prepare(
                 "SELECT id FROM runs
-                 WHERE status NOT IN ('done', 'failed', 'cancelled')
+                 WHERE status NOT IN ('done', 'failed', 'cancelled', 'awaiting_merge')
                  ORDER BY created_ms",
             )?;
             let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;

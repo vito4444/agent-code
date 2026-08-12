@@ -241,6 +241,10 @@ pub enum EventPayload {
     /// Emitted by the supervisor, not the agent.
     AgentExited { code: Option<i32>, signal: Option<i32> },
 
+    /// An orchestration event, nested rather than flattened so the two vocabularies cannot
+    /// collide as they grow.
+    Run { run: RunEvent },
+
     /// The agent asked us to read or write a file on its behalf.
     ///
     /// Recorded for every attempt, allowed or refused. The protocol has the client perform real
@@ -267,6 +271,134 @@ pub enum EventPayload {
 pub enum FileOp {
     Read,
     Write,
+}
+
+/// Orchestration events.
+///
+/// These share the event log with conversation events rather than living in their own table. The
+/// `session_id` column is really a stream identifier, and a run uses `run:<uuid>`. One log means
+/// one resume mechanism, one ordering, and one answer to "what happened, in what order" — which is
+/// the whole reason a run can be replayed at all.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum RunEvent {
+    Started {
+        run_id: String,
+        goal: String,
+        project_root: String,
+        base_commit: String,
+    },
+    /// The planner produced a graph and it survived validation.
+    Planned {
+        tasks: Vec<TaskSummary>,
+        /// Task ids grouped so that everything in one group can run at once.
+        waves: Vec<Vec<String>>,
+        attempt: u32,
+    },
+    /// The planner produced a graph that did not survive validation.
+    ///
+    /// Recorded rather than retried silently: a planner that keeps producing invalid graphs is
+    /// something the reader needs to see, and the problems are the input to the next attempt.
+    PlanRejected {
+        problems: Vec<String>,
+        attempt: u32,
+    },
+    TaskStateChanged {
+        task_id: String,
+        status: TaskStatus,
+        /// Why, when the status alone does not say. A failure reason, a conflict summary.
+        detail: Option<String>,
+    },
+    /// A task's isolated workspace exists and starts from this commit.
+    ///
+    /// The commit is the interesting part: for a task with dependencies it is a real merge of their
+    /// results, which is what makes the edge carry the work rather than a description of it.
+    TaskWorkspaceReady {
+        task_id: String,
+        branch: String,
+        start_commit: String,
+        /// The dependency commits folded into the starting point, in order.
+        from_dependencies: Vec<String>,
+    },
+    TaskVerified {
+        task_id: String,
+        passed: bool,
+        /// Assertions that were supposed to start passing and did not.
+        missing_pass: Vec<String>,
+        /// Assertions that were passing and stopped.
+        regressed: Vec<String>,
+        detail: Option<String>,
+    },
+    /// A deterministic predicate said the graph was wrong.
+    Replanning {
+        trigger: String,
+        task_id: String,
+        attempt: u32,
+    },
+    /// Everything that passed has been combined, and the result is waiting for a human.
+    ///
+    /// Deliberately not an automatic merge. Verification proves the tests we named pass; it does
+    /// not prove the change is what was wanted, and the published rates at which models exploit
+    /// weak test suites are high enough that the gate stays closed until somebody looks.
+    AwaitingMerge {
+        commit: String,
+        order: Vec<String>,
+        /// Tasks that never made it into the candidate.
+        excluded: Vec<String>,
+    },
+    /// A candidate could not be assembled because entries would not combine.
+    MergeRejected {
+        task_id: String,
+        detail: String,
+        /// The tasks that did combine, which keep their work.
+        merged: Vec<String>,
+    },
+    Finished {
+        status: RunStatus,
+        detail: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskSummary {
+    pub id: String,
+    pub title: String,
+    pub depends_on: Vec<String>,
+    pub declared_paths: Vec<String>,
+    /// The command the acceptance check will run.
+    pub verify_cmd: String,
+    /// Assertions that decide whether the task succeeded. A task with none of these would have
+    /// been rejected at validation; they are shown so the reader can see what "done" means.
+    pub must_pass: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Pending,
+    Ready,
+    Dispatched,
+    Verifying,
+    Completed,
+    Failed,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunStatus {
+    Planning,
+    Running,
+    /// Waiting for a human to merge.
+    AwaitingMerge,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+/// The stream identifier a run's events are recorded under.
+pub fn run_stream_id(run_id: &str) -> String {
+    format!("run:{run_id}")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

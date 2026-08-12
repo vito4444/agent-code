@@ -99,6 +99,16 @@ pub struct Connection {
     /// line before a response is a notification, so "the response was line N, therefore wait for
     /// line N-1" is wrong whenever the agent had another request in flight.
     dispatched_seq: Arc<AtomicU64>,
+    /// The highest read position that has been placed in its destination session's inbox.
+    ///
+    /// Distinct from `dispatched_seq`, which only means "the reader pushed it towards the
+    /// dispatcher". The gap between the two matters because one process serves several sessions:
+    /// a turn waiting for the notifications that preceded its response cannot use its own progress
+    /// as the measure, since the lines in between may belong to a different session and will never
+    /// arrive in its inbox at all. That is exactly the case where waiting on one's own progress
+    /// stalls until the timeout, and it only appears once two sessions share a process — so it is
+    /// invisible in any test that opens one.
+    routed_seq: Arc<tokio::sync::watch::Sender<u64>>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -135,6 +145,8 @@ impl Connection {
         let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Response, RpcError>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let dispatched_seq = Arc::new(AtomicU64::new(0));
+        let (routed_tx, _routed_rx) = tokio::sync::watch::channel(0u64);
+        let routed_seq = Arc::new(routed_tx);
 
         // stderr is drained on its own task. An agent that writes a lot of diagnostics
         // and is never read from will eventually block on a full pipe and appear to hang.
@@ -300,6 +312,7 @@ impl Connection {
             child: Arc::new(Mutex::new(child)),
             raw_sink,
             dispatched_seq,
+            routed_seq,
         })
     }
 
@@ -386,6 +399,50 @@ impl Connection {
     }
 
     /// Read position of the last line dispatched inbound.
+    /// Records that everything up to `seq` has reached its destination inbox.
+    ///
+    /// Called by whoever routes messages to sessions, after the push rather than before: a
+    /// watermark that advances before delivery would let a waiter conclude it has a message that is
+    /// still in flight.
+    pub fn note_routed(&self, seq: u64) {
+        self.routed_seq.send_if_modified(|current| {
+            if seq > *current {
+                *current = seq;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
+    pub fn routed_seq(&self) -> u64 {
+        *self.routed_seq.borrow()
+    }
+
+    /// Waits until everything up to `target` has reached its destination inbox.
+    ///
+    /// Returns `false` on timeout. A line can be unparseable and therefore never routed, so this
+    /// cannot be unbounded.
+    pub async fn wait_routed(&self, target: u64, timeout: std::time::Duration) -> bool {
+        if self.routed_seq() >= target {
+            return true;
+        }
+        let mut rx = self.routed_seq.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if *rx.borrow_and_update() >= target {
+                return true;
+            }
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            if tokio::time::timeout(remaining, rx.changed()).await.is_err() {
+                return false;
+            }
+        }
+    }
+
     pub fn dispatched_seq(&self) -> u64 {
         self.dispatched_seq.load(Ordering::SeqCst)
     }

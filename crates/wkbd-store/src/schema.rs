@@ -341,6 +341,37 @@ ALTER TABLE proposals_new RENAME TO proposals;
 CREATE INDEX idx_proposals_status ON proposals(status, created_ms);
 "#,
     },
+    Migration {
+        version: 6,
+        name: "run_awaiting_merge_state",
+        sql: r#"
+-- Separates "waiting for a human to merge" from "blocked".
+--
+-- Both would otherwise be `blocked`, and they need opposite handling: a blocked run has a
+-- dependency that failed and there is nothing for anyone to do about it, while a run awaiting a
+-- merge finished successfully and is waiting on a decision. Recovery treats them differently too —
+-- a blocked run is over, an awaiting one must not be restarted, and a resume that cannot tell them
+-- apart will either re-run finished work or abandon a candidate somebody was about to accept.
+-- Recreating the table is the only way to widen a CHECK constraint in SQLite.
+CREATE TABLE runs_new (
+    id           TEXT PRIMARY KEY,
+    goal         TEXT NOT NULL,
+    project_root TEXT NOT NULL,
+    status       TEXT NOT NULL
+                   CHECK (status IN ('planning','running','blocked','awaiting_merge',
+                                     'done','failed','cancelled')),
+    created_ms   INTEGER NOT NULL,
+    updated_ms   INTEGER NOT NULL,
+    base_commit  TEXT
+);
+
+INSERT INTO runs_new (id, goal, project_root, status, created_ms, updated_ms, base_commit)
+SELECT id, goal, project_root, status, created_ms, updated_ms, base_commit FROM runs;
+
+DROP TABLE runs;
+ALTER TABLE runs_new RENAME TO runs;
+"#,
+    },
 ];
 
 pub fn current_version(conn: &Connection) -> rusqlite::Result<i64> {

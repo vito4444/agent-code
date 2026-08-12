@@ -3,16 +3,19 @@ import { Composer, type AutonomyLevel } from './components/composer/Composer';
 import { Turn } from './components/chat/Turn';
 import { RulesScreen } from './components/rules/RulesScreen';
 import { RawInspector } from './components/inspector/RawInspector';
+import { RunList, StartRun } from './components/run/RunList';
+import { RunView } from './components/run/RunView';
 import * as api from './lib/api';
-import { contextPercent, emptySession, useStore } from './lib/store';
+import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
 
-type Screen = 'chat' | 'rules' | 'inspector';
+type Screen = 'chat' | 'rules' | 'inspector' | 'runs';
 
 export function App() {
   const store = useStore();
   const [screen, setScreen] = useState<Screen>('chat');
   const [autonomy, setAutonomy] = useState<AutonomyLevel>('ask_outside_sandbox');
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const streamRef = useRef<EventStream | null>(null);
 
   // The stream is created once. Recreating it on state change would reconnect on every
@@ -47,11 +50,23 @@ export function App() {
       });
   }, []);
 
+  // Runs are folded from the event stream, so this only covers the window before the replay
+  // arrives, and a run whose events have been trimmed from the log.
+  useEffect(() => {
+    api
+      .listRuns()
+      .then((list) => useStore.getState().seedRuns(list))
+      .catch(() => {});
+  }, []);
+
   const activeId = store.activeSessionId;
   const session = activeId ? (store.sessions[activeId] ?? emptySession()) : emptySession();
   const summary = store.sessionList.find((s) => s.id === activeId);
 
   const percent = useMemo(() => contextPercent(session), [session]);
+
+  const runs = useMemo(() => runList(store.runs), [store.runs]);
+  const activeRun = activeRunId ? (store.runs[activeRunId] ?? null) : null;
 
   // When a turn finishes and something is queued, send the next one. This is where the
   // queue is honest: it waits for the turn to actually end rather than guessing from a
@@ -108,6 +123,15 @@ export function App() {
           ))}
         </ul>
         <div className="sidebar-footer">
+          <button
+            type="button"
+            data-active={screen === 'runs'}
+            onClick={() => setScreen('runs')}
+            title="One sentence, planned into a task graph and worked on in parallel"
+            data-testid="nav-runs"
+          >
+            Runs
+          </button>
           <button type="button" data-active={screen === 'rules'} onClick={() => setScreen('rules')}>
             User rules
           </button>
@@ -135,6 +159,29 @@ export function App() {
 
         {screen === 'rules' && <RulesScreen projectRoot={summary?.project_root ?? null} />}
         {screen === 'inspector' && <RawInspector />}
+
+        {screen === 'runs' && (
+          <section className="runs">
+            {activeRun ? (
+              <RunView run={activeRun} onBack={() => setActiveRunId(null)} />
+            ) : (
+              <>
+                <h1>Runs</h1>
+                <StartRun
+                  onStarted={(run) => {
+                    useStore.getState().seedRuns([run]);
+                    setActiveRunId(run.id);
+                  }}
+                />
+                <RunList
+                  runs={runs}
+                  activeRunId={activeRunId}
+                  onSelect={(id) => setActiveRunId(id)}
+                />
+              </>
+            )}
+          </section>
+        )}
 
         {screen === 'chat' && (
           <>

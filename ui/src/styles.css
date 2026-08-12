@@ -1005,6 +1005,634 @@
   font-size: var(--chat-font-size-s);
 }
 
+/* --------------------------------------------------------------------- runs */
+
+/*
+ * A run is a graph, not a conversation, so this screen is the one place the 950px measure is
+ * dropped: waves are laid out side by side and capping the width would force the concurrency
+ * into a scroll bar at three tasks.
+ */
+.runs {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-24);
+  width: 100%;
+}
+
+.runs h1 {
+  font-size: var(--chat-font-size-xxl);
+  margin: 0 0 var(--space-16);
+}
+
+.run-start {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-24);
+  max-width: var(--conversation-max-width);
+}
+
+.run-start-goal {
+  width: 100%;
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  font: inherit;
+  font-size: var(--chat-font-size-l);
+  resize: vertical;
+}
+
+.run-start-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  font-size: var(--chat-font-size-s);
+}
+
+.run-start-label {
+  color: var(--fg-subtle);
+  margin-right: var(--space-6);
+}
+
+.run-start-actions input {
+  height: var(--control-small-size);
+  padding: 0 var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  font: inherit;
+  font-family: var(--font-mono);
+  min-width: 280px;
+}
+
+.run-start-actions button {
+  height: var(--control-medium-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+  font: inherit;
+}
+
+.run-start-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: var(--conversation-max-width);
+}
+
+.run-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-8) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  cursor: pointer;
+  font: inherit;
+  color: var(--fg-default);
+}
+
+.run-row:hover,
+.run-row[data-active='true'] {
+  background: var(--bg-muted);
+}
+
+.run-row-goal {
+  font-size: var(--chat-font-size-l);
+}
+
+.run-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-row-root {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one thing that has to survive a glance down a list of runs: which of them wants a person. */
+.run-row-waiting {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+}
+
+.runs-empty {
+  color: var(--fg-subtle);
+  font-size: var(--chat-font-size-s);
+  max-width: var(--conversation-max-width);
+}
+
+/* ----------------------------------------------------------------- run view */
+
+.run-header {
+  margin-bottom: var(--space-24);
+}
+
+.run-back {
+  border: none;
+  background: transparent;
+  padding: 0 0 var(--space-6);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-accent);
+}
+
+.run-goal {
+  font-size: var(--chat-font-size-xxl);
+  margin: 0 0 var(--space-6);
+  max-width: var(--conversation-max-width);
+}
+
+.run-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-root {
+  font-family: var(--font-mono);
+}
+
+.run-status {
+  border: var(--border-thin) solid currentColor;
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-status[data-status='running'],
+.run-status[data-status='planning'] {
+  color: var(--fg-accent);
+}
+
+.run-status[data-status='awaiting_merge'] {
+  color: var(--fg-attention);
+}
+
+.run-status[data-status='done'] {
+  color: var(--fg-success);
+}
+
+.run-status[data-status='failed'] {
+  color: var(--fg-danger);
+}
+
+.run-action {
+  height: var(--control-small-size);
+  padding: 0 var(--control-padding-inline-condensed);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+}
+
+.run-detail,
+.run-blocker {
+  margin: var(--space-8) 0 0;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+  max-width: var(--conversation-max-width);
+}
+
+/* A run that wants a decision is not in the same category as one that is merely stuck, and the
+   colour is the only thing separating them at a glance. */
+.run-blocker[data-kind='awaiting_merge'] {
+  color: var(--fg-attention);
+}
+
+.run-blocker[data-kind='failed'],
+.run-blocker[data-kind='merge_rejected'] {
+  color: var(--fg-danger);
+}
+
+.run-error {
+  margin: var(--space-8) 0 0;
+  padding: var(--space-8);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  font-size: var(--chat-font-size-s);
+  max-width: var(--conversation-max-width);
+}
+
+.run-empty {
+  color: var(--fg-subtle);
+  font-size: var(--chat-font-size-s);
+  max-width: var(--conversation-max-width);
+}
+
+.run-section {
+  margin: var(--space-24) 0;
+  max-width: var(--conversation-max-width);
+}
+
+.run-section h2,
+.merge-gate h2 {
+  font-size: var(--chat-font-size-l);
+  margin: 0 0 var(--space-8);
+}
+
+/* ------------------------------------------------------------- task graph */
+
+/*
+ * One column per wave, tasks stacked inside it. Position carries the whole graph: a column is
+ * a set of tasks that run at once, and columns run left to right in dependency order. Scrolling
+ * horizontally is the accepted cost — collapsing waves into one column would lose the only
+ * property the layout exists to show.
+ */
+.run-waves {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(280px, 1fr);
+  gap: var(--stack-gap-normal);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--space-8);
+}
+
+.run-wave {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-gap-condensed);
+  min-width: 0;
+}
+
+/* The rule between columns is the boundary between "at the same time" and "after". Without it
+   two adjacent columns read as one wide list. */
+.run-wave + .run-wave {
+  border-left: var(--border-thin) solid var(--border-default);
+  padding-left: var(--stack-gap-normal);
+}
+
+.wave-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--chat-font-size-s);
+  margin: 0;
+}
+
+.wave-note {
+  font-size: var(--chat-font-size-xs);
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+.task-card {
+  border: var(--border-thin) solid var(--border-default);
+  border-left: 3px solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* Status is on the left edge as well as in the pill: down a column of cards the edge is what is
+   actually scannable, and the pill is what is unambiguous. */
+.task-card[data-status='completed'] {
+  border-left-color: var(--fg-success);
+}
+
+.task-card[data-status='failed'] {
+  border-left-color: var(--fg-danger);
+  background: var(--bg-danger-muted);
+}
+
+.task-card[data-status='blocked'] {
+  border-left-color: var(--fg-attention);
+  background: var(--bg-attention-muted);
+}
+
+.task-card[data-status='dispatched'],
+.task-card[data-status='verifying'] {
+  border-left-color: var(--fg-accent);
+}
+
+.task-card[data-status='pending'] {
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+
+.task-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.task-title {
+  font-weight: 600;
+  font-size: var(--chat-font-size-m);
+}
+
+.task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--chat-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.task-status[data-status='completed'] {
+  color: var(--fg-success);
+}
+
+.task-status[data-status='failed'] {
+  color: var(--fg-danger);
+}
+
+.task-status[data-status='blocked'] {
+  color: var(--fg-attention);
+}
+
+.task-status[data-status='dispatched'],
+.task-status[data-status='verifying'] {
+  color: var(--fg-accent);
+}
+
+.task-detail {
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.task-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-8);
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+}
+
+.task-facts dt {
+  color: var(--fg-subtle);
+}
+
+.task-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.path-list,
+.assertion-list,
+.id-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-none {
+  color: var(--fg-subtle);
+}
+
+.task-cmd {
+  overflow-wrap: anywhere;
+}
+
+.task-workspace {
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.task-missing {
+  margin: 0;
+  padding: var(--space-8);
+  border: var(--border-thin) dashed var(--border-default);
+  border-radius: var(--radius-medium);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+/* --------------------------------------------------------------- verdicts */
+
+.task-verdict {
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+}
+
+.task-verdict[data-passed='true'] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--fg-success);
+}
+
+.verdict-head {
+  margin: 0 0 var(--space-4);
+  color: var(--fg-danger);
+  font-weight: 600;
+}
+
+.verdict-group h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--chat-font-size-xs);
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+/* A regression is work that was already correct being broken, so it is the one that gets the
+   full danger treatment; an assertion that never started passing is an unfinished task. */
+.verdict-group[data-severity='regressed'] .assertion-list {
+  color: var(--fg-danger);
+}
+
+.verdict-group[data-severity='missing-pass'] .assertion-list {
+  color: var(--fg-attention);
+}
+
+.verdict-detail {
+  margin: var(--space-4) 0 0;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------- replans and rejections */
+
+.problem-list,
+.replan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font-size: var(--chat-font-size-s);
+}
+
+.plan-rejection {
+  padding: var(--space-8);
+  border-left: 3px solid var(--fg-attention);
+  background: var(--bg-attention-muted);
+  border-radius: 0 var(--radius-medium) var(--radius-medium) 0;
+  margin-bottom: var(--space-8);
+}
+
+.plan-attempt,
+.replan-attempt {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.replan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+}
+
+.replan-trigger {
+  font-weight: 600;
+}
+
+.replan-task {
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.merge-rejection {
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--fg-danger);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  margin-bottom: var(--space-8);
+  font-size: var(--chat-font-size-s);
+}
+
+.rejection-dropped {
+  margin: 0;
+  font-weight: 600;
+  color: var(--fg-danger);
+}
+
+.rejection-detail {
+  margin: var(--space-4) 0;
+  color: var(--fg-default);
+  overflow-wrap: anywhere;
+}
+
+.rejection-kept {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.rejection-kept .id-list,
+.merge-order .id-list,
+.merge-excluded .id-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* -------------------------------------------------------------- merge gate */
+
+/*
+ * The gate is attention-coloured rather than success-coloured even though everything in it
+ * passed. Green here would read as "done", and the entire point of this section is that it is
+ * not done until somebody decides it is.
+ */
+.merge-gate {
+  margin: var(--space-24) 0;
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-medium);
+  background: var(--bg-attention-muted);
+  max-width: var(--conversation-max-width);
+}
+
+.merge-why {
+  margin: 0 0 var(--space-12);
+  font-size: var(--chat-font-size-s);
+}
+
+.merge-candidate {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-s);
+}
+
+.merge-order,
+.merge-excluded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+}
+
+.merge-order-label,
+.merge-excluded-label,
+.rejection-kept-label {
+  color: var(--fg-muted);
+}
+
+.merge-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
+
+.merge-button {
+  height: var(--control-medium-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+}
+
+.merge-button:disabled,
+.run-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ---------------------------------------------------------------- inspector */
 
 .inspector-header {

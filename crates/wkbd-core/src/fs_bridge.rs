@@ -136,6 +136,20 @@ pub fn write_text_file(guard: &PathGuard, params: &Value) -> Outcome {
     // the condition under which the published defects in this area triggered.
     let mut file = match guard.open_write_create(path) {
         Ok(f) => f,
+        Err(e) if e.is_not_found() => {
+            // The directory above it does not exist, and the protocol has no method for creating
+            // one. Without this an agent cannot put a file anywhere new, and what it does instead is
+            // the write itself, outside anything we can check — so refusing here buys no safety and
+            // costs the boundary. The directories are created through the guard, component by
+            // component against the descriptor above, so this stays inside it.
+            match guard.create_parents(path) {
+                Ok(_) => match guard.open_write_create(path) {
+                    Ok(f) => f,
+                    Err(e) => return Outcome::from_guard_error(FileOp::Write, requested, e),
+                },
+                Err(e) => return Outcome::from_guard_error(FileOp::Write, requested, e),
+            }
+        }
         Err(e) => return Outcome::from_guard_error(FileOp::Write, requested, e),
     };
 

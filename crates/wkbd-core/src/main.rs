@@ -14,6 +14,8 @@
 
 mod api;
 mod fs_bridge;
+mod planner;
+mod run;
 mod runner;
 mod state;
 
@@ -53,6 +55,23 @@ struct Cli {
     /// Start without restoring anything from the previous run.
     #[arg(long)]
     safe_mode: bool,
+
+    /// Which agent does orchestrated work. Without one, the run endpoints refuse rather than
+    /// accepting a run nothing will execute.
+    #[arg(long)]
+    worker_agent: Option<String>,
+
+    /// Which agent drafts task graphs. Defaults to the worker agent.
+    #[arg(long)]
+    planner_agent: Option<String>,
+
+    /// Read task graphs from this JSON file instead of asking a model.
+    ///
+    /// For tests and for reproducing a run: a graph is a graph, and everything downstream behaves
+    /// identically whether a model or a file produced it. That is what lets the end-to-end test
+    /// exercise a real multi-task run against a real repository with no credentials.
+    #[arg(long)]
+    fixed_plan: Option<std::path::PathBuf>,
 
     /// Do not offer `fs/read_text_file` and `fs/write_text_file` to agents.
     ///
@@ -166,6 +185,7 @@ async fn main() -> Result<()> {
         raw: Mutex::new(Vec::new()),
         degraded: opened.degraded.clone(),
         offer_client_fs: !cli.no_client_fs,
+        runs: std::sync::Mutex::new(None),
         state_dir: state_dir.clone(),
         pending_permissions: Mutex::new(Default::default()),
     });
@@ -184,6 +204,64 @@ async fn main() -> Result<()> {
         }
     } else {
         tracing::warn!(mode = ?safe_mode, "safe mode: not restoring previous state");
+    }
+
+    // Built after the state because it holds a reference to it: a run opens agent sessions, and
+    // those live in the state.
+    if let Some(worker) = &cli.worker_agent {
+        let planner: Arc<dyn planner::Planner> = match &cli.fixed_plan {
+            Some(path) => {
+                let body = std::fs::read_to_string(path)
+                    .with_context(|| format!("reading {}", path.display()))?;
+                // One graph, or a list of them. The list form is how a test scripts "the first
+                // graph is rejected, the second is accepted".
+                let graphs: Vec<wkbd_orch::DraftGraph> =
+                    match serde_json::from_str::<Vec<wkbd_orch::DraftGraph>>(&body) {
+                        Ok(list) => list,
+                        Err(_) => vec![serde_json::from_str(&body)
+                            .with_context(|| format!("parsing {}", path.display()))?],
+                    };
+                Arc::new(planner::FixedPlanner::new(graphs))
+            }
+            None => Arc::new(planner::AgentPlanner {
+                state: app_state.clone(),
+                agent_id: cli.planner_agent.clone().unwrap_or_else(|| worker.clone()),
+                project_root: std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| ".".to_string()),
+            }),
+        };
+
+        let engine = Arc::new(run::RunEngine {
+            store: store.clone(),
+            state: app_state.clone(),
+            planner,
+            worker_agent: worker.clone(),
+            // Outside the repository. A worktree inside it appears in the repository's own status
+            // and in its globs, and then one task's ownership check starts seeing another task's
+            // files.
+            worktree_root: state_dir.join("worktrees"),
+        });
+        app_state.set_runs(engine.clone());
+
+        // Runs a crash interrupted. Every finished step returns its checkpoint instead of running
+        // again, so this resumes rather than restarts: re-creating an existing worktree fails, and
+        // re-dispatching a finished task pays for the work twice.
+        if !cli.safe_mode {
+            match wkbd_orch::unfinished_runs(&store).await {
+                Ok(ids) => {
+                    for id in ids {
+                        tracing::info!(run = %id, "resuming an unfinished run");
+                        if let Err(e) = engine.resume(&id).await {
+                            // Nothing on the startup path may make the application unopenable, so a
+                            // run that will not resume is logged and skipped.
+                            tracing::error!(run = %id, error = %e, "could not resume");
+                        }
+                    }
+                }
+                Err(e) => tracing::error!(error = %e, "could not scan for unfinished runs"),
+            }
+        }
     }
 
     let mut app = api::router(app_state.clone());

@@ -93,7 +93,13 @@ struct State {
     sessions: HashMap<String, Session>,
     next_session: u64,
     /// Ids of permission requests we are waiting on, mapped to the step index to resume.
-    pending_permission: Option<i64>,
+    /// Requests we are waiting for an answer to, by request id.
+    ///
+    /// A set rather than one slot. One process serves several sessions — the client's pool keys on
+    /// agent plus launch settings, not on session — so two turns can be in flight at once, and a
+    /// single slot means one turn's answer clears the other's wait. The stall that produces looks
+    /// exactly like a client that did not reply.
+    pending: std::collections::HashSet<i64>,
 }
 
 fn write_line(v: &Value) {
@@ -140,7 +146,7 @@ async fn main() -> Result<()> {
         cli,
         sessions: HashMap::new(),
         next_session: 0,
-        pending_permission: None,
+        pending: std::collections::HashSet::new(),
     }));
 
     let stdin = tokio::io::stdin();
@@ -160,8 +166,11 @@ async fn main() -> Result<()> {
 
         // A response to something we asked (currently only permission requests).
         if msg.get("method").is_none() && msg.get("id").is_some() {
+            let answered = msg.get("id").and_then(|v| v.as_i64());
             let mut s = state.lock().unwrap();
-            s.pending_permission = None;
+            if let Some(id) = answered {
+                s.pending.remove(&id);
+            }
             eprintln!("fake-acp-agent: got response {}", msg.get("id").unwrap());
             continue;
         }
@@ -358,7 +367,7 @@ async fn run_script(
             }
             Step::AskPermission { tool_call_id, title } => {
                 let req_id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-                state.lock().unwrap().pending_permission = Some(req_id);
+                state.lock().unwrap().pending.insert(req_id);
                 write_line(&json!({
                     "jsonrpc": "2.0",
                     "id": req_id,
@@ -378,7 +387,7 @@ async fn run_script(
                 for _ in 0..600 {
                     {
                         let s = state.lock().unwrap();
-                        if s.pending_permission.is_none() {
+                        if !s.pending.contains(&req_id) {
                             break;
                         }
                         if s.sessions.get(session_id).map(|x| x.cancelled).unwrap_or(false) {
@@ -410,7 +419,7 @@ async fn run_script(
             Step::Request { method, params, label } => {
                 let params = substitute_root(&params, cwd);
                 let req_id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-                state.lock().unwrap().pending_permission = Some(req_id);
+                state.lock().unwrap().pending.insert(req_id);
 
                 let mut full = params;
                 full["sessionId"] = json!(session_id);
@@ -427,7 +436,7 @@ async fn run_script(
                 for _ in 0..600 {
                     {
                         let s = state.lock().unwrap();
-                        if s.pending_permission.is_none() {
+                        if !s.pending.contains(&req_id) {
                             break;
                         }
                     }

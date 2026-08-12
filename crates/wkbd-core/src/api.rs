@@ -31,6 +31,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/sessions/{id}/permission", post(answer_permission))
         .route("/api/sessions/{id}/config", post(set_config))
         .route("/api/terminals/{id}", get(terminal_output))
+        .route("/api/runs", get(list_runs).post(create_run))
+        .route("/api/runs/{id}", get(get_run))
+        .route("/api/runs/{id}/merge", post(merge_run))
+        .route("/api/runs/{id}/abandon", post(abandon_run))
         .route("/api/rules", get(list_rules).post(create_rule))
         .route("/api/rules/{id}", delete(delete_rule))
         .route("/api/raw", get(raw_frames))
@@ -159,6 +163,110 @@ async fn prompt(
         *session2.busy.lock().await = false;
     });
 
+    Ok(StatusCode::ACCEPTED)
+}
+
+#[derive(Deserialize)]
+struct CreateRun {
+    goal: String,
+    project_root: String,
+}
+
+async fn create_run(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateRun>,
+) -> Result<impl IntoResponse, ApiError> {
+    let engine = state
+        .runs()
+        .ok_or_else(|| ApiError::not_implemented("no worker agent is configured for runs"))?;
+
+    // Rejected here rather than discovered three steps in. A run against a directory that is not a
+    // repository fails at the first worktree, after the planner has already been paid for.
+    let root = std::path::Path::new(&body.project_root);
+    if !root.join(".git").exists() {
+        return Err(ApiError::bad_request(
+            "a run needs a git repository: parallel isolation is worktrees, and there is no .git              here",
+        ));
+    }
+    if body.goal.trim().is_empty() {
+        return Err(ApiError::bad_request("a run needs a goal"));
+    }
+
+    let id = engine
+        .start(&body.goal, &body.project_root)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": id }))))
+}
+
+async fn list_runs(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+    let rows = state
+        .store
+        .read(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, goal, project_root, status, created_ms, updated_ms
+                 FROM runs ORDER BY created_ms DESC LIMIT 200",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(json!({
+                    "id": r.get::<_, String>(0)?,
+                    "goal": r.get::<_, String>(1)?,
+                    "project_root": r.get::<_, String>(2)?,
+                    "status": r.get::<_, String>(3)?,
+                    "created_ms": r.get::<_, i64>(4)?,
+                    "updated_ms": r.get::<_, i64>(5)?,
+                }))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            Ok(out)
+        })
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(json!({ "runs": rows })))
+}
+
+/// A run plus its events, so a client that joins late can render it without replaying the whole log.
+async fn get_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let stream = wkbd_proto::run_stream_id(&id);
+    let (events, _) = state
+        .store
+        .read_since(Some(&stream), 0, 5000)
+        .map_err(ApiError::internal)?;
+    if events.is_empty() {
+        return Err(ApiError { status: StatusCode::NOT_FOUND, message: "no such run".into() });
+    }
+    Ok(Json(json!({ "id": id, "events": events })))
+}
+
+async fn merge_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let engine = state
+        .runs()
+        .ok_or_else(|| ApiError::not_implemented("runs are not configured"))?;
+    // The only path by which anything a run produced reaches the user's branch, and it exists only
+    // because a person asked. Verification proves the named tests pass; it does not prove the change
+    // was wanted, and the measured rate at which models exploit a writable test suite is high enough
+    // that "the tests pass" cannot be the last word.
+    let commit = engine.merge(&id).await.map_err(|e| ApiError::conflict(&e.to_string()))?;
+    Ok(Json(json!({ "commit": commit })))
+}
+
+async fn abandon_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let engine = state
+        .runs()
+        .ok_or_else(|| ApiError::not_implemented("runs are not configured"))?;
+    engine.abandon(&id).await.map_err(ApiError::internal)?;
     Ok(StatusCode::ACCEPTED)
 }
 

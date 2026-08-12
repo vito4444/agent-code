@@ -102,6 +102,80 @@ export interface Cost {
   currency: string;
 }
 
+/* --------------------------------------------------------------- orchestration */
+
+export type TaskStatus =
+  | 'pending'
+  | 'ready'
+  | 'dispatched'
+  | 'verifying'
+  | 'completed'
+  | 'failed'
+  | 'blocked';
+
+export type RunStatus =
+  | 'planning'
+  | 'running'
+  | 'awaiting_merge'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+export interface TaskSummary {
+  id: string;
+  title: string;
+  depends_on: string[];
+  declared_paths: string[];
+  /** The command the acceptance check runs. */
+  verify_cmd: string;
+  /**
+   * The assertions that decide whether the task succeeded. A task with none of these would
+   * have been rejected at validation, so an empty list here means the graph reached us by
+   * some other route and the interface should not imply the task has a bar to clear.
+   */
+  must_pass: string[];
+}
+
+/** Discriminated by `event`, matching the Rust serde tag on `RunEvent`. */
+export type RunEvent =
+  | { event: 'started'; run_id: string; goal: string; project_root: string; base_commit: string }
+  | { event: 'planned'; tasks: TaskSummary[]; waves: string[][]; attempt: number }
+  | { event: 'plan_rejected'; problems: string[]; attempt: number }
+  | { event: 'task_state_changed'; task_id: string; status: TaskStatus; detail: string | null }
+  | {
+      event: 'task_workspace_ready';
+      task_id: string;
+      branch: string;
+      start_commit: string;
+      from_dependencies: string[];
+    }
+  | {
+      event: 'task_verified';
+      task_id: string;
+      passed: boolean;
+      /** Assertions that were supposed to start passing and did not. */
+      missing_pass: string[];
+      /** Assertions that were passing and stopped. */
+      regressed: string[];
+      detail: string | null;
+    }
+  | { event: 'replanning'; trigger: string; task_id: string; attempt: number }
+  | { event: 'awaiting_merge'; commit: string; order: string[]; excluded: string[] }
+  | { event: 'merge_rejected'; task_id: string; detail: string; merged: string[] }
+  | { event: 'finished'; status: RunStatus; detail: string | null };
+
+/**
+ * The run a stream belongs to, or null for a conversation stream.
+ *
+ * Runs share the event log with conversations, and `session_id` is really a stream
+ * identifier — mirrors `run_stream_id` in the core. Reading the id back out here is what
+ * keeps run state out of `sessions`, which otherwise gains an entry per run that no screen
+ * can render.
+ */
+export function runIdFromStreamId(streamId: string): string | null {
+  return streamId.startsWith('run:') ? streamId.slice('run:'.length) : null;
+}
+
 /** Discriminated by `event`, matching the Rust serde tag. */
 export type EventPayload =
   | { event: 'turn_started'; turn: number; prompt: string }
@@ -140,6 +214,7 @@ export type EventPayload =
   | { event: 'config_options_changed'; options: ConfigOption[] }
   | { event: 'usage_changed'; used: number; size: number; cost: Cost | null }
   | { event: 'plan_changed'; entries: PlanEntry[] }
+  | { event: 'run'; run: RunEvent }
   | { event: 'unknown_update'; discriminant: string; raw: string }
   | { event: 'agent_error'; message: string }
   | { event: 'agent_exited'; code: number | null; signal: number | null };
@@ -197,6 +272,20 @@ export interface SessionSummary {
   agent_display_name: string;
   project_root: string;
   title: string | null;
+}
+
+/**
+ * A run as the list endpoint reports it.
+ *
+ * Carries only what a list row needs. Everything else about a run — its graph, its task states,
+ * its base commit — is folded from the run's events, because a summary that duplicated them
+ * would be a second source of truth able to disagree with the log about what happened.
+ */
+export interface RunSummary {
+  id: string;
+  goal: string;
+  project_root: string;
+  status: RunStatus;
 }
 
 /** A message the user composed while the agent was busy. */

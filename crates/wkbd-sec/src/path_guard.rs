@@ -135,6 +135,13 @@ impl GuardError {
             GuardError::NotADirectory { .. } => "not-a-directory",
             GuardError::NotARegularFile { .. } => "not-a-regular-file",
             GuardError::MalformedPath { .. } => "malformed-path",
+            // Separated from a general I/O failure because the protocol requires the client to
+            // create a file that does not exist, so "not there" is the ordinary path rather than a
+            // fault. Folding the two together makes the most common outcome undiagnosable: a
+            // reader cannot tell a missing parent directory from a failing disk.
+            GuardError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound => {
+                "not-found"
+            }
             GuardError::Io { .. } => "io-error",
             GuardError::BackendUnavailable => "backend-unavailable",
             GuardError::UnsupportedPlatform => "unsupported-platform",
@@ -332,6 +339,28 @@ mod sys {
         Ok(())
     }
 
+    /// Creates one directory relative to an open descriptor.
+    ///
+    /// Relative to a descriptor rather than by absolute path, and that is the whole point. Resolving
+    /// a parent and then creating by path leaves a window in which the parent can be replaced by a
+    /// symlink, and the create would follow it out of the boundary — which is the exact class of
+    /// defect this module exists to rule out. `EEXIST` is success: something else may have created
+    /// it, and the caller re-resolves through the guard afterwards anyway.
+    pub(super) fn mkdirat(parent: RawFd, name: &OsStr) -> io::Result<()> {
+        let Some(c) = cstring(name) else {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "interior nul in a path"));
+        };
+        let rc = unsafe { libc::mkdirat(parent, c.as_ptr(), 0o755) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EEXIST) {
+            return Ok(());
+        }
+        Err(err)
+    }
+
     pub(super) fn ftruncate(fd: RawFd) -> io::Result<()> {
         if unsafe { libc::ftruncate(fd, 0) } < 0 {
             return Err(io::Error::last_os_error());
@@ -482,6 +511,67 @@ impl PathGuard {
     /// resolution that validated it rejected every symlink; there is nothing left for a
     /// join to get wrong. A leaf that does not exist yet still resolves, provided its
     /// parent directory passes.
+    /// Creates every missing directory on the way to `requested`, inside the boundary.
+    ///
+    /// Needed because the protocol has a method for writing a file and none for creating a
+    /// directory, so without this an agent cannot put a file in a directory that does not exist yet
+    /// — and the workaround it would reach for is doing the write itself, outside anything we can
+    /// check. That trade is worse than the one made here.
+    ///
+    /// Each component is created with `mkdirat` against the descriptor of the component above it,
+    /// which is what keeps this inside the boundary: there is no moment at which a path is resolved
+    /// and then used by name, so there is no window in which a directory can be swapped for a
+    /// symlink pointing out.
+    ///
+    /// Returns how many directories were created, so a caller can record that it happened.
+    pub fn create_parents(&self, requested: &Path) -> Result<usize, GuardError> {
+        let (root, rel) = self.locate(requested)?;
+        let Some(parent) = rel.parent() else { return Ok(0) };
+
+        let mut created = 0;
+        let mut walked = PathBuf::new();
+        for component in parent.components() {
+            let Component::Normal(name) = component else {
+                // `locate` already refused `..`, so anything else here would be a component it
+                // cannot describe; refusing rather than skipping keeps the two in step.
+                return Err(GuardError::MalformedPath {
+                    requested: requested.to_path_buf(),
+                });
+            };
+            let existing = self.open_at(root, &walked, requested, Intent::Probe);
+            let dir_fd = match existing {
+                Ok(fd) => fd,
+                Err(e) => return Err(e),
+            };
+            match sys::mkdirat(dir_fd.as_raw_fd(), name) {
+                Ok(()) => {}
+                Err(source) => {
+                    return Err(GuardError::Io {
+                        requested: requested.to_path_buf(),
+                        source,
+                    })
+                }
+            }
+            walked.push(name);
+            // Re-resolved through the guard after each step. A directory we just created cannot be
+            // a symlink, but saying so is an assumption rather than a check, and this is the one
+            // place in the system where an assumption of that shape is not worth making.
+            let check = self.open_at(root, &walked, requested, Intent::Probe)?;
+            let st = sys::fstat(check.as_raw_fd()).map_err(|source| GuardError::Io {
+                requested: requested.to_path_buf(),
+                source,
+            })?;
+            if !sys::is_dir(&st) {
+                return Err(GuardError::NotADirectory {
+                    requested: requested.to_path_buf(),
+                    at: walked.clone(),
+                });
+            }
+            created += 1;
+        }
+        Ok(created)
+    }
+
     pub fn resolve_for_display(&self, requested: &Path) -> Result<PathBuf, GuardError> {
         let (root, rel) = self.locate(requested)?;
         match self.open_at(root, &rel, requested, Intent::Probe) {
@@ -857,5 +947,100 @@ mod tests {
         // reported as E2BIG at runtime, far away from the cause.
         assert_eq!(std::mem::size_of::<sys::OpenHow>(), 24);
         assert_eq!(sys::STRICT_RESOLVE, 0x02 | 0x04 | 0x08);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod create_parents_tests {
+    use super::*;
+
+    fn guard(root: &Path) -> PathGuard {
+        PathGuard::new(vec![root.to_path_buf()]).unwrap()
+    }
+
+    #[test]
+    fn creates_the_missing_directories_inside_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = guard(dir.path());
+        let target = dir.path().join("a/b/c/file.txt");
+        assert_eq!(g.create_parents(&target).unwrap(), 3);
+        assert!(dir.path().join("a/b/c").is_dir());
+        // And the write that motivated it now succeeds.
+        assert!(g.open_write_create(&target).is_ok());
+    }
+
+    #[test]
+    fn creating_what_already_exists_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        let g = guard(dir.path());
+        assert!(g.create_parents(&dir.path().join("a/b/f.txt")).is_ok());
+    }
+
+    /// The reason this is a guard method rather than `create_dir_all` on the resolved path.
+    #[test]
+    fn refuses_to_create_through_a_symlink_that_leaves_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
+
+        let g = guard(dir.path());
+        let err = g
+            .create_parents(&dir.path().join("escape/inner/file.txt"))
+            .unwrap_err();
+        assert!(
+            matches!(err, GuardError::SymlinkEncountered { .. }),
+            "expected a symlink refusal, got {err}"
+        );
+        assert!(
+            !outside.path().join("inner").exists(),
+            "a directory was created outside the boundary"
+        );
+    }
+
+    #[test]
+    fn refuses_a_path_outside_the_root_before_creating_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let g = guard(dir.path());
+        let err = g
+            .create_parents(&outside.path().join("a/b/f.txt"))
+            .unwrap_err();
+        assert!(matches!(err, GuardError::OutsideRoot { .. }), "{err}");
+        assert!(!outside.path().join("a").exists());
+    }
+
+    #[test]
+    fn refuses_parent_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = guard(dir.path());
+        let target = dir.path().join("../sneaky/f.txt");
+        assert!(g.create_parents(&target).is_err());
+    }
+
+    /// A file where a directory is needed has to be refused rather than reported as I/O trouble,
+    /// because the caller's next move differs: one is a mistake in the request, the other is not.
+    #[test]
+    fn a_file_in_the_way_is_refused_as_not_a_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a"), "i am a file").unwrap();
+        let g = guard(dir.path());
+        let err = g.create_parents(&dir.path().join("a/b/f.txt")).unwrap_err();
+        assert!(
+            matches!(err, GuardError::NotADirectory { .. } | GuardError::Io { .. }),
+            "{err}"
+        );
+    }
+
+    /// The audit kind for "it is not there" has to be its own thing. The protocol makes the client
+    /// create files that do not exist, so this is the ordinary path, and a reader who sees
+    /// `io-error` cannot tell a missing parent directory from a failing disk.
+    #[test]
+    fn a_missing_path_is_audited_as_not_found_rather_than_as_io_trouble() {
+        let dir = tempfile::tempdir().unwrap();
+        let g = guard(dir.path());
+        let err = g.open_read(&dir.path().join("nope.txt")).unwrap_err();
+        assert!(err.is_not_found(), "{err}");
+        assert_eq!(err.audit_kind(), "not-found");
     }
 }

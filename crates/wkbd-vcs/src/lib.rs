@@ -35,3 +35,27 @@ pub use worktree::{
     add_worktree, hydrate, is_branch_checked_out, list_worktrees, remove_worktree, HydrationSpec,
     SetupCommand, Worktree, WorktreeInfo,
 };
+
+/// The commit the repository's checked-out branch is on.
+pub fn head_commit(repo: &std::path::Path) -> Result<String> {
+    let out = git::run(repo, &["rev-parse", "HEAD"])?;
+    if !out.success() {
+        return Err(out.error());
+    }
+    Ok(out.stdout_trimmed()?.to_string())
+}
+
+/// Moves the checked-out branch to `commit`, updating the working tree to match.
+///
+/// `merge --ff-only` rather than `reset --hard`: a fast-forward refuses when the branch has moved
+/// somewhere the commit does not contain, which is exactly the case where a reset would silently
+/// discard somebody's work. The caller has already predicted the merge, so the refusal here is the
+/// second check on a race the first one cannot close — the branch can move between the prediction
+/// and this call.
+pub fn update_head(repo: &std::path::Path, commit: &str) -> Result<()> {
+    let out = git::run(repo, &["merge", "--ff-only", commit])?;
+    if !out.success() {
+        return Err(out.error());
+    }
+    Ok(())
+}

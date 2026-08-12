@@ -1,8 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EventBatcher, applyOne, contextPercent, emptySession, liveSegment } from './store';
+import {
+  EventBatcher,
+  applyOne,
+  applyRunOne,
+  contextPercent,
+  emptyRun,
+  emptySession,
+  liveSegment,
+  runBlocker,
+  runList,
+  taskById,
+  useStore,
+} from './store';
 import type { TurnItem } from './types';
-import type { SessionState } from './store';
-import type { EventPayload, WkbdEvent } from './types';
+import type { RunState, SessionState } from './store';
+import type { EventPayload, RunEvent, TaskSummary, WkbdEvent } from './types';
 
 function fold(payloads: EventPayload[]): SessionState {
   return payloads.reduce(applyOne, emptySession());
@@ -99,6 +111,205 @@ describe('event folding', () => {
     expect(state.busy).toBe(false);
     expect(state.turns[0].stop_reason).toBe('unknown');
     expect(liveSegment(state.turns[0])).toBeNull();
+  });
+});
+
+describe('run folding', () => {
+  function foldRun(events: RunEvent[]): RunState {
+    return events.reduce(applyRunOne, emptyRun('r1'));
+  }
+
+  function task(id: string, overrides: Partial<TaskSummary> = {}): TaskSummary {
+    return {
+      id,
+      title: `Task ${id}`,
+      depends_on: [],
+      declared_paths: [`src/${id}.rs`],
+      verify_cmd: 'cargo test',
+      must_pass: [`${id}::works`],
+      ...overrides,
+    };
+  }
+
+  const started: RunEvent = {
+    event: 'started',
+    run_id: 'r1',
+    goal: 'add a login endpoint',
+    project_root: '/repo',
+    base_commit: '9f1c2d3e4a5b6c7d8e9f0a1b',
+  };
+
+  const planned: RunEvent = {
+    event: 'planned',
+    tasks: [task('a'), task('b'), task('c', { depends_on: ['a', 'b'] })],
+    waves: [['a', 'b'], ['c']],
+    attempt: 1,
+  };
+
+  it('carries a run from its first event to the merge gate', () => {
+    const state = foldRun([
+      started,
+      planned,
+      { event: 'task_state_changed', task_id: 'a', status: 'dispatched', detail: null },
+      {
+        event: 'task_workspace_ready',
+        task_id: 'a',
+        branch: 'wkbd/r1/a',
+        start_commit: 'aaaa1111bbbb2222',
+        from_dependencies: [],
+      },
+      { event: 'task_state_changed', task_id: 'b', status: 'dispatched', detail: null },
+      { event: 'task_state_changed', task_id: 'a', status: 'verifying', detail: null },
+      {
+        event: 'task_verified',
+        task_id: 'a',
+        passed: true,
+        missing_pass: [],
+        regressed: [],
+        detail: null,
+      },
+      { event: 'task_state_changed', task_id: 'a', status: 'completed', detail: null },
+      {
+        event: 'awaiting_merge',
+        commit: 'cccc3333dddd4444',
+        order: ['a'],
+        excluded: ['b', 'c'],
+      },
+    ]);
+
+    expect(state.goal).toBe('add a login endpoint');
+    expect(state.project_root).toBe('/repo');
+    expect(state.base_commit).toBe('9f1c2d3e4a5b6c7d8e9f0a1b');
+    expect(state.waves).toEqual([['a', 'b'], ['c']]);
+    expect(Object.keys(state.tasks)).toEqual(['a', 'b', 'c']);
+
+    expect(taskById(state, 'a')?.status).toBe('completed');
+    expect(taskById(state, 'a')?.workspace?.branch).toBe('wkbd/r1/a');
+    expect(taskById(state, 'a')?.verification?.passed).toBe(true);
+    expect(taskById(state, 'b')?.status).toBe('dispatched');
+    expect(taskById(state, 'c')?.status).toBe('pending');
+
+    // Acceptance passing moves the run to the gate, not past it.
+    expect(state.status).toBe('awaiting_merge');
+    expect(state.mergeCandidate).toEqual({ commit: 'cccc3333dddd4444', order: ['a'] });
+    expect(state.excluded).toEqual(['b', 'c']);
+  });
+
+  it('keeps the progress of tasks a replan did not touch', () => {
+    const state = foldRun([
+      started,
+      planned,
+      { event: 'task_state_changed', task_id: 'a', status: 'completed', detail: null },
+      { event: 'replanning', trigger: 'acceptance_failed', task_id: 'b', attempt: 2 },
+      {
+        event: 'planned',
+        tasks: [task('a'), task('b2')],
+        waves: [['a'], ['b2']],
+        attempt: 2,
+      },
+    ]);
+
+    expect(taskById(state, 'a')?.status).toBe('completed');
+    // The replaced task is gone rather than lingering as a card nothing will ever update.
+    expect(taskById(state, 'b')).toBeNull();
+    expect(state.replans).toEqual([
+      { trigger: 'acceptance_failed', task_id: 'b', attempt: 2 },
+    ]);
+  });
+
+  it('records a rejected plan rather than showing only the retry', () => {
+    const state = foldRun([
+      started,
+      { event: 'plan_rejected', problems: ['task c declares no assertions'], attempt: 1 },
+    ]);
+    expect(state.status).toBe('planning');
+    expect(state.waves).toEqual([]);
+    expect(state.planRejections[0].problems).toEqual(['task c declares no assertions']);
+  });
+
+  it('creates a task from a state change the plan never mentioned', () => {
+    const state = foldRun([
+      started,
+      { event: 'task_state_changed', task_id: 'ghost', status: 'failed', detail: 'timed out' },
+    ]);
+    expect(taskById(state, 'ghost')?.status).toBe('failed');
+    expect(taskById(state, 'ghost')?.detail).toBe('timed out');
+  });
+
+  it('routes run events to runs and leaves the session map alone', () => {
+    useStore.getState().applyEvents([
+      { seq: 1, session_id: 'run:r1', at_ms: 0, payload: { event: 'run', run: started } },
+      { seq: 2, session_id: 'run:r1', at_ms: 0, payload: { event: 'run', run: planned } },
+    ]);
+
+    const store = useStore.getState();
+    expect(store.sessions['run:r1']).toBeUndefined();
+    expect(store.runs['r1'].waves).toEqual([['a', 'b'], ['c']]);
+    expect(runList(store.runs).map((r) => r.id)).toContain('r1');
+    expect(store.highWaterMark).toBe(2);
+  });
+});
+
+describe('where a run is stuck', () => {
+  const base = emptyRun('r1');
+
+  it('is nothing while the run is simply working', () => {
+    expect(runBlocker({ ...base, status: 'running' })).toBeNull();
+  });
+
+  it('is the waiting candidate even when a task failed earlier', () => {
+    const state: RunState = {
+      ...base,
+      status: 'awaiting_merge',
+      mergeCandidate: { commit: 'abc', order: ['a'] },
+      excluded: ['b'],
+      tasks: {
+        b: {
+          summary: {
+            id: 'b',
+            title: 'b',
+            depends_on: [],
+            declared_paths: [],
+            verify_cmd: '',
+            must_pass: [],
+          },
+          status: 'failed',
+          detail: null,
+          workspace: null,
+          verification: null,
+        },
+      },
+    };
+    // A run that is finished except for a decision must not read as still working.
+    expect(runBlocker(state)).toEqual({ kind: 'awaiting_merge', commit: 'abc', excluded: ['b'] });
+  });
+
+  it('is the failing tasks while the run is still going', () => {
+    const state: RunState = {
+      ...base,
+      status: 'running',
+      tasks: {
+        a: {
+          summary: {
+            id: 'a',
+            title: 'a',
+            depends_on: [],
+            declared_paths: [],
+            verify_cmd: '',
+            must_pass: [],
+          },
+          status: 'failed',
+          detail: null,
+          workspace: null,
+          verification: null,
+        },
+      },
+    };
+    expect(runBlocker(state)).toEqual({ kind: 'failed', task_ids: ['a'] });
+  });
+
+  it('is nothing once the run is over', () => {
+    expect(runBlocker({ ...base, status: 'done' })).toBeNull();
   });
 });
 

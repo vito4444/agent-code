@@ -148,29 +148,53 @@ fn snapshot_inner(root: &Path, globs: &[String], content_dir: Option<&Path>) -> 
     })
 }
 
-/// Makes the matching files read-only (0444).
+/// Makes the matching files read-only by clearing their write bits.
 ///
 /// Worth doing because it stops the accidental case and makes the deliberate case
 /// deliberate — an agent that chmods the test suite before editing it has done something
 /// no honest workflow does, and [`verify_snapshot`] will say so. It is not a boundary:
 /// the directories stay writable (they have to; the build writes there), so a file can
 /// still be deleted and recreated. Running as root defeats it entirely.
+///
+/// Clearing bits rather than assigning `0o444`, and this is not a detail. Assigning a mode drops
+/// the executable bit, and the file most likely to be protected is the one that runs the tests. The
+/// effects compound: git tracks the executable bit, so the chmod appears in `git diff` as a
+/// modification to a file the task never touched — which the ownership check then reports as the
+/// task changing something it did not declare. So protecting the acceptance suite would fail every
+/// task, and the reported reason would name the wrong culprit.
 pub fn lock_paths(root: &Path, globs: &[String]) -> Result<Vec<PathBuf>> {
-    set_mode(root, globs, 0o444)
+    adjust_mode(root, globs, |mode| mode & !0o222)
 }
 
-/// Restores write permission, for the harness's own updates and for cleanup.
+/// Restores write permission for the owner, for the harness's own updates and for cleanup.
+///
+/// Adds one bit rather than assigning a mode, for the same reason: the previous implementation
+/// assigned `0o644` and permanently unset the executable bit on whatever it had protected.
 pub fn unlock_paths(root: &Path, globs: &[String]) -> Result<Vec<PathBuf>> {
-    set_mode(root, globs, 0o644)
+    adjust_mode(root, globs, |mode| mode | 0o200)
 }
 
-fn set_mode(root: &Path, globs: &[String], mode: u32) -> Result<Vec<PathBuf>> {
+fn adjust_mode(
+    root: &Path,
+    globs: &[String],
+    f: impl Fn(u32) -> u32,
+) -> Result<Vec<PathBuf>> {
     let root = canonical_root(root)?;
     let patterns = pathset::parse_all(globs)?;
     let mut touched = Vec::new();
     for rel in walk_matching(&root, &patterns)? {
         let absolute = root.join(&rel);
-        set_file_mode(&absolute, mode)?;
+        let current = std::fs::metadata(&absolute)
+            .map(|m| {
+                use std::os::unix::fs::PermissionsExt;
+                m.permissions().mode()
+            })
+            .map_err(|source| VcsError::Io {
+                operation: "reading a mode before changing it",
+                path: absolute.clone(),
+                source,
+            })?;
+        set_file_mode(&absolute, f(current & 0o7777))?;
         touched.push(absolute);
     }
     Ok(touched)
@@ -402,4 +426,87 @@ fn set_file_mode(path: &Path, mode: u32) -> Result<()> {
         .permissions();
     perms.set_readonly(mode & 0o200 == 0);
     std::fs::set_permissions(path, perms).map_err(|e| VcsError::io("set permissions", path, e))
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode_of(p: &Path) -> u32 {
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o7777
+    }
+
+    /// The file most likely to be protected is the one that runs the tests, and the previous
+    /// implementation assigned `0o444` and then `0o644`, so protecting it left it unable to run. The
+    /// second-order effect was worse: git tracks the executable bit, so the chmod showed up in
+    /// `git diff` and the ownership check reported the task as having modified a file it never
+    /// touched — failing every task for a reason that named the wrong file.
+    #[test]
+    fn locking_an_executable_file_leaves_it_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("check.sh");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let globs = vec!["*.sh".to_string()];
+        lock_paths(dir.path(), &globs).unwrap();
+        let locked = mode_of(&script);
+        assert_eq!(locked & 0o222, 0, "must not be writable, got {locked:o}");
+        assert_ne!(locked & 0o111, 0, "must stay executable, got {locked:o}");
+
+        unlock_paths(dir.path(), &globs).unwrap();
+        assert_eq!(mode_of(&script), 0o755, "the original mode must come back");
+    }
+
+    #[test]
+    fn locking_a_plain_file_does_not_make_it_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("data.txt");
+        std::fs::write(&f, "x").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let globs = vec!["*.txt".to_string()];
+        lock_paths(dir.path(), &globs).unwrap();
+        assert_eq!(mode_of(&f) & 0o111, 0);
+        unlock_paths(dir.path(), &globs).unwrap();
+        assert_eq!(mode_of(&f), 0o644);
+    }
+
+    /// The reason the mode matters at all: git records the executable bit, so changing it is a
+    /// change to the file as far as every diff-based check is concerned.
+    #[test]
+    fn a_lock_and_unlock_cycle_leaves_nothing_for_git_to_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo)
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t.invalid")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t.invalid")
+                .output()
+                .unwrap()
+        };
+        run(&["init", "-q", "."]);
+        std::fs::create_dir_all(repo.join("tests")).unwrap();
+        let script = repo.join("tests/check.sh");
+        std::fs::write(&script, "#!/bin/sh\necho hi\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-q", "-m", "i"]);
+
+        let globs = vec!["tests/**".to_string()];
+        lock_paths(repo, &globs).unwrap();
+        unlock_paths(repo, &globs).unwrap();
+
+        let out = run(&["diff", "--name-only"]);
+        let reported = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            reported.trim().is_empty(),
+            "protecting a file must not look like changing it; git reported: {reported}"
+        );
+    }
 }
