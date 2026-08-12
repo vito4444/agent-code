@@ -14,6 +14,7 @@ use wkbd_agent::{
     SessionHandle, SessionOpenRequest, SessionPurpose,
 };
 use wkbd_proto::Event;
+use wkbd_sec::path_guard::PathGuard;
 use wkbd_sec::permission::PermissionStore;
 use wkbd_store::Store;
 
@@ -29,6 +30,10 @@ pub struct InspectorFrame {
 
 pub struct LiveSession {
     pub handle: Arc<SessionHandle>,
+    /// Enforces the filesystem boundary for anything we do on this agent's behalf. `None` when
+    /// client-side file access is not offered, in which case the agent does its own I/O and we
+    /// see none of it.
+    pub guard: Option<Arc<PathGuard>>,
     pub agent_id: String,
     pub agent_display_name: String,
     pub project_root: String,
@@ -52,6 +57,9 @@ pub struct AppState {
     pub events: broadcast::Sender<Event>,
     pub raw: Mutex<Vec<InspectorFrame>>,
     pub degraded: Option<String>,
+    /// Whether to offer `fs/*` to agents. On by default: an agent that cannot ask us reads the
+    /// file itself, outside any boundary we can enforce and outside the audit log.
+    pub offer_client_fs: bool,
     /// Where the database, blobs, boot state and process registry live. Held because the
     /// orchestrator will place worktrees relative to it, and a diagnostics export needs to know
     /// what to collect.
@@ -92,13 +100,34 @@ impl AppState {
                     purpose,
                     resume_acp_session_id: None,
                     handoff_summary: None,
+                    client_capabilities: crate::fs_bridge::client_capabilities(
+                        self.offer_client_fs,
+                    ),
                 },
                 |spec, config| build_agent_command(spec, config),
             )
             .await?;
 
+        // Rooted at the project, and only at the project. Extra roots are a deliberate, auditable
+        // decision rather than something an agent can ask for: the protocol lets it name any
+        // absolute path, so the set of roots is the entire boundary.
+        let guard = if self.offer_client_fs {
+            match PathGuard::new(vec![std::path::PathBuf::from(project_root)]) {
+                Ok(g) => Some(Arc::new(g)),
+                Err(e) => {
+                    // Refusing to offer the capability is the fail-closed direction. Offering it
+                    // with no working guard would be the one combination that must never happen.
+                    tracing::error!(error = %e, "could not build a path guard; not offering fs/*");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
         let session = Arc::new(LiveSession {
+            guard,
             agent_id: spec.id.clone(),
             agent_display_name: spec.display_name.clone(),
             project_root: project_root.to_string(),

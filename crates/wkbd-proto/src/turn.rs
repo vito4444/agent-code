@@ -41,6 +41,27 @@ pub enum TurnItem {
     Error {
         message: String,
     },
+    /// A file access we refused.
+    ///
+    /// Its own item rather than a generic error: a refusal is a boundary decision, not a fault,
+    /// and the reader needs to be able to tell "the agent tried to leave its workspace" from
+    /// "something broke". Allowed accesses are not rendered inline — there are far too many of
+    /// them — and live in the audit list instead.
+    FileRefused {
+        op: FileOp,
+        requested: String,
+        refusal: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FileAccessRecord {
+    pub op: FileOp,
+    pub requested: String,
+    pub resolved: Option<String>,
+    pub allowed: bool,
+    pub refusal: Option<String>,
+    pub bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -78,6 +99,9 @@ pub struct ViewBuilder {
     pub config_options: Vec<ConfigOptionView>,
     pub plan: Vec<PlanEntryView>,
     pub unknown_updates: Vec<(String, String)>,
+    /// Every file access attempted on the agent's behalf, allowed or not. The audit trail for
+    /// the one interface where an unsandboxed process acts for a sandboxed one.
+    pub file_accesses: Vec<FileAccessRecord>,
 }
 
 impl ViewBuilder {
@@ -262,6 +286,32 @@ impl ViewBuilder {
             EventPayload::AgentError { message } => {
                 if let Some(t) = self.turns.last_mut() {
                     t.items.push(TurnItem::Error { message: message.clone() });
+                }
+            }
+            EventPayload::FileAccess {
+                op,
+                requested,
+                resolved,
+                allowed,
+                refusal,
+                bytes,
+            } => {
+                self.file_accesses.push(FileAccessRecord {
+                    op: *op,
+                    requested: requested.clone(),
+                    resolved: resolved.clone(),
+                    allowed: *allowed,
+                    refusal: refusal.clone(),
+                    bytes: *bytes,
+                });
+                if !*allowed {
+                    if let Some(t) = self.turns.last_mut() {
+                        t.items.push(TurnItem::FileRefused {
+                            op: *op,
+                            requested: requested.clone(),
+                            refusal: refusal.clone().unwrap_or_else(|| "refused".into()),
+                        });
+                    }
                 }
             }
             EventPayload::AgentExited { code, signal } => {

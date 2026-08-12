@@ -108,6 +108,7 @@ async fn run_turn(
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
+                client_capabilities: serde_json::json!({}),
             },
             command_builder(),
         )
@@ -366,6 +367,7 @@ async fn a_non_json_banner_on_stdout_does_not_break_the_handshake() {
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
+                client_capabilities: serde_json::json!({}),
             },
             command_builder(),
         )
@@ -389,6 +391,7 @@ async fn a_process_that_dies_mid_request_fails_the_request_instead_of_hanging() 
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
+                client_capabilities: serde_json::json!({}),
             },
             command_builder(),
         )
@@ -422,6 +425,7 @@ async fn cancelling_settles_the_open_tool_call() {
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
+                client_capabilities: serde_json::json!({}),
             },
             command_builder(),
         )
@@ -563,6 +567,7 @@ async fn a_runtime_config_change_is_reported_honestly_when_the_agent_refuses() {
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
+                client_capabilities: serde_json::json!({}),
             },
             command_builder(),
         )
@@ -591,6 +596,7 @@ async fn a_runtime_config_change_succeeds_when_the_agent_supports_it() {
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
+                client_capabilities: serde_json::json!({}),
             },
             command_builder(),
         )
@@ -624,6 +630,7 @@ async fn config_options_survive_absent_and_unknown_categories() {
                     purpose: SessionPurpose::NewChat,
                     resume_acp_session_id: None,
                     handoff_summary: None,
+                    client_capabilities: serde_json::json!({}),
                 },
                 command_builder(),
             )
@@ -673,6 +680,7 @@ async fn every_session_purpose_receives_the_prelude() {
                         .then(|| "no-such-session".to_string()),
                     handoff_summary: matches!(purpose, SessionPurpose::RelaunchForConfig)
                         .then(|| "was halfway through refactoring the loader".to_string()),
+                    client_capabilities: serde_json::json!({}),
                 },
                 command_builder(),
             )

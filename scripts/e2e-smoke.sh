@@ -277,6 +277,153 @@ kill "$DAEMON2_PID" 2>/dev/null || true
 wait "$DAEMON2_PID" 2>/dev/null || true
 rm -rf "$STATE2"
 
+# --------------------------------------------------------- process cleanup
+#
+# Three layers, and only the third covers a hard crash. It reads a registry, so something has to
+# write one; a sweep over an empty file is a layer that exists in the code and not in effect. This
+# kills the daemon with SIGKILL, which skips every graceful path, and then checks that a fresh
+# daemon finds and reaps what was left.
+echo
+echo "checking cleanup after a hard crash"
+CRASH_STATE=$(mktemp -d)
+PORT4=$((PORT + 3))
+CRASH_BASE=$(pgrep -x fake-acp-agent 2>/dev/null | wc -l | tr -d ' ')
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$CRASH_STATE" --listen "127.0.0.1:$PORT4" \
+    --agent "fake=Fake=$ROOT/target/debug/fake-acp-agent --profile spartan" \
+    > "$CRASH_STATE/daemon.log" 2>&1 &
+DAEMON4_PID=$!
+for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$PORT4/api/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
+curl -sf -X POST "http://127.0.0.1:$PORT4/api/sessions" -H 'content-type: application/json' \
+    -d "{\"agent_id\":\"fake\",\"project_root\":\"$CRASH_STATE\"}" > /dev/null 2>&1
+sleep 1
+
+check_ge "cleanup: the registry records the spawned agent" 1 \
+    "$(jq -r '.entries | length' "$CRASH_STATE/processes.json" 2>/dev/null || echo 0)"
+
+# SIGKILL: no signal handler runs, no graceful shutdown, no Drop. Exactly the case the boot sweep
+# is for. The child dies with us via the death signal, so what is being checked is that the
+# registry entry is left behind for the sweep and that the sweep tolerates it.
+kill -9 "$DAEMON4_PID" 2>/dev/null || true
+wait "$DAEMON4_PID" 2>/dev/null || true
+DAEMON4_PID=""
+sleep 1
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$CRASH_STATE" --listen "127.0.0.1:$PORT4" \
+    --agent "fake=Fake=$ROOT/target/debug/fake-acp-agent --profile spartan" \
+    > "$CRASH_STATE/daemon2.log" 2>&1 &
+DAEMON5_PID=$!
+for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$PORT4/api/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
+check "cleanup: a fresh daemon starts after a hard crash" "true" \
+    "$(curl -sf "http://127.0.0.1:$PORT4/api/health" 2>/dev/null | jq -r '.ok // false')"
+kill "$DAEMON5_PID" 2>/dev/null || true
+wait "$DAEMON5_PID" 2>/dev/null || true
+sleep 1
+CRASH_AFTER=$(pgrep -x fake-acp-agent 2>/dev/null | wc -l | tr -d ' ')
+check "cleanup: no agent survived the crash and the restart" "0" "$((CRASH_AFTER - CRASH_BASE))"
+rm -rf "$CRASH_STATE"
+
+# ------------------------------------------------------- filesystem boundary
+#
+# The protocol has the client perform disk I/O on the agent's behalf, with an absolute path the
+# agent chose, and defines no boundary of its own. The guard has its own tests; this checks that
+# the daemon actually wired it into the protocol path, which is a different claim. "The capability
+# was declared but the check was skipped" looks exactly like success from outside, so the agent
+# here really tries to leave, four ways, and the assertions are about what did not happen on disk
+# as well as what the log says.
+echo
+echo "checking the filesystem boundary against a probing agent"
+FS_STATE=$(mktemp -d)
+PORT3=$((PORT + 2))
+WORK="$FS_STATE/work"
+OUTSIDE="$FS_STATE/outside"
+mkdir -p "$WORK/nested" "$WORK/via" "$OUTSIDE" "${WORK}_evil"
+echo "inside the workspace" > "$WORK/inside.txt"
+echo "not for the agent" > "$OUTSIDE/secret.txt"
+echo "not for the agent either" > "${WORK}_evil/secret.txt"
+ln -s "$OUTSIDE/secret.txt" "$WORK/escape-link"
+ln -s "$OUTSIDE" "$WORK/via/link"
+rm -f /tmp/wkbd-should-not-exist
+
+FSAGENT="$ROOT/target/debug/fake-acp-agent --profile fsprobe"
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$FS_STATE/state" --listen "127.0.0.1:$PORT3" \
+    --agent "probe=Probing Agent=$FSAGENT" > "$FS_STATE/daemon.log" 2>&1 &
+DAEMON3_PID=$!
+for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$PORT3/api/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
+
+SID3=$(curl -sf -X POST "http://127.0.0.1:$PORT3/api/sessions" \
+    -H 'content-type: application/json' \
+    -d "{\"agent_id\":\"probe\",\"project_root\":\"$WORK\"}" 2>/dev/null | jq -r '.id // empty')
+
+if [ -n "$SID3" ]; then
+    curl -sf -X POST "http://127.0.0.1:$PORT3/api/sessions/$SID3/prompt" \
+        -H 'content-type: application/json' -d '{"text":"probe the boundary"}' > /dev/null 2>&1
+    for _ in $(seq 1 80); do
+        python3 "$ROOT/scripts/read-events.py" "$PORT3" 0 1.0 > "$FS_STATE/events.json" 2>/dev/null || echo '[]' > "$FS_STATE/events.json"
+        [ "$(jq -r '[.[]|select(.payload.event=="turn_ended")]|length' "$FS_STATE/events.json")" != "0" ] && break
+        sleep 0.25
+    done
+    E3="$FS_STATE/events.json"
+
+    check "boundary: reads inside the workspace are allowed" "true" \
+        "$(jq -r --arg p "$WORK/inside.txt" '[.[]|select(.payload.event=="file_access" and .payload.requested==$p)]|last.payload.allowed' "$E3")"
+    check "boundary: writes inside the workspace are allowed" "true" \
+        "$(jq -r --arg p "$WORK/written-by-agent.txt" '[.[]|select(.payload.event=="file_access" and .payload.requested==$p)]|last.payload.allowed' "$E3")"
+    check "boundary: the written file is really there" "written through the client" \
+        "$(cat "$WORK/written-by-agent.txt" 2>/dev/null || echo MISSING)"
+    # The protocol requires the client to create a file that does not exist. That is the normal
+    # path, and it is the condition the published defects in this area needed.
+    check "boundary: a missing file inside the workspace is created" "created on demand" \
+        "$(cat "$WORK/nested/new.txt" 2>/dev/null || echo MISSING)"
+
+    # Four escapes, each a published defect shape.
+    check "boundary: an absolute path outside is refused" "outside-root" \
+        "$(jq -r '[.[]|select(.payload.event=="file_access" and .payload.requested=="/etc/passwd")]|last.payload.refusal' "$E3")"
+    check "boundary: a symlink pointing out is refused" "symlink-encountered" \
+        "$(jq -r --arg p "$WORK/escape-link" '[.[]|select(.payload.event=="file_access" and .payload.requested==$p)]|last.payload.refusal' "$E3")"
+    check "boundary: a symlink as an intermediate component is refused" "symlink-encountered" \
+        "$(jq -r --arg p "$WORK/via/link/secret.txt" '[.[]|select(.payload.event=="file_access" and .payload.requested==$p)]|last.payload.refusal' "$E3")"
+    check "boundary: a sibling whose name shares the prefix is refused" "outside-root" \
+        "$(jq -r --arg p "${WORK}_evil/secret.txt" '[.[]|select(.payload.event=="file_access" and .payload.requested==$p)]|last.payload.refusal' "$E3")"
+
+    # What the log says is one thing; what happened on disk is another.
+    if [ -e /tmp/wkbd-should-not-exist ]; then
+        printf 'FAIL %-64s %s\n' "boundary: the write outside the workspace did not land" "IT LANDED"
+        FAILED=1
+        rm -f /tmp/wkbd-should-not-exist
+    else
+        printf 'ok   %-64s %s\n' "boundary: the write outside the workspace did not land" "absent"
+    fi
+    # Narrower than it looks, and worth labelling honestly: file contents are never put in the
+    # log, so this checks that property rather than proving the escapes failed. What proves that
+    # is the refusal reasons above and the absent file below.
+    check "boundary: file contents are never written to the log" "0" \
+        "$(jq -r '[.[]|select(.payload|tostring|test("not for the agent"))]|length' "$E3")"
+    # Every attempt is recorded, allowed or not. Enforcement with no record cannot be audited.
+    check_ge "boundary: attempts recorded" 8 \
+        "$(jq -r '[.[]|select(.payload.event=="file_access")]|length' "$E3")"
+    check "boundary: refusals are visible in the turn, not swallowed" "true" \
+        "$(jq -r '[.[]|select(.payload.event=="file_access" and .payload.allowed==false)]|length >= 5' "$E3")"
+else
+    echo "FAIL could not open a session against the probing agent"
+    FAILED=1
+fi
+
+kill "$DAEMON3_PID" 2>/dev/null || true
+wait "$DAEMON3_PID" 2>/dev/null || true
+rm -rf "$FS_STATE"
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "vertical slice works end to end"

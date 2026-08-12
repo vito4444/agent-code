@@ -70,20 +70,34 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace           # 243 tests
+cargo test --workspace           # 246 tests
 cd ui && pnpm vitest run         # 41 tests
 ./scripts/m0-mergetree.sh        # 15 assertions about git's own behaviour
-./scripts/e2e-smoke.sh           # 32 assertions across the whole slice
+./scripts/e2e-smoke.sh           # 47 assertions across the whole slice
 ```
 
 `e2e-smoke.sh` is the one to run before believing anything works. Every defect described in
 section 5 was found there and by nothing else.
 
-It exercises two agents, not one. The first declares everything the protocol allows; the second
+It exercises three agents, not one. The first declares everything the protocol allows; the second
 declares none of it — no `messageId`, no config options, no usage — from a separate daemon and a
 cold start. That second pass is the one most users will actually be on, so the assertions include
 that segmentation still splits correctly without message ids, that every boundary is marked as
 inferred, and that neither config options nor usage are invented.
+
+The third really tries to escape its workspace, four ways: an absolute path outside the roots, a
+symlink inside pointing out, a symlink as an intermediate component, and a sibling directory whose
+name begins with the root's name. The guard has its own tests; this is a different claim — that the
+daemon wired it into the protocol path — and "the capability was declared but the check was
+skipped" looks exactly like success from outside. Alongside the refusal reasons it asserts that the
+attempted write outside the workspace is absent from disk afterwards. Bypassing the guard in
+`fs_bridge` turns five of those red, and the failure reads `the write outside the workspace did not
+land: IT LANDED` rather than an assertion diff.
+
+There is also a hard-crash pass: `SIGKILL` the daemon, which skips every graceful path, then start
+a fresh one and check that nothing survived. It exists because the boot-side sweep reads a process
+registry, and until recently nothing wrote one — a cleanup layer present in the code and absent in
+effect.
 
 ## 4. The decisions worth knowing
 

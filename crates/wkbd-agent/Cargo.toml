@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 wkbd-proto.workspace = true
+# Owns process-lifetime policy. The pool spawns the processes, so it is the pool's job to make
+# sure they can always be cleaned up.
+wkbd-sec.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

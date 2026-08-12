@@ -134,6 +134,12 @@ pub struct SessionOpenRequest {
     /// There is no in-place model switch; pretending otherwise would be a control that
     /// appears to work and changes nothing.
     pub handoff_summary: Option<String>,
+    /// What we tell the agent we can do for it, sent verbatim at `initialize`.
+    ///
+    /// Supplied by the caller rather than fixed here, because whether to offer client-side file
+    /// I/O is a policy decision with a real trade-off on both sides, and the layer that owns the
+    /// boundary enforcement is the layer that should decide.
+    pub client_capabilities: Value,
 }
 
 pub struct SessionHandle {
@@ -303,9 +309,16 @@ impl SessionFactory {
         let conn = self.pool.acquire(&req.spec, &req.config, build_command).await?;
         let process_key = AgentPool::key_for(&req.spec, &req.config);
 
-        conn.request("initialize", json!({ "protocolVersion": 1 }))
-            .await
-            .map_err(|e| anyhow::anyhow!("initialize failed: {e}"))?;
+        conn.request(
+            "initialize",
+            json!({
+                "protocolVersion": 1,
+                "clientCapabilities": req.client_capabilities,
+                "clientInfo": { "name": "wkbd", "version": env!("CARGO_PKG_VERSION") },
+            }),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("initialize failed: {e}"))?;
 
         // Resume where possible so history is not lost, but fall back to a new session
         // rather than failing: an agent that cannot load a session should still be usable.

@@ -150,6 +150,7 @@ async fn prompt(
             permissions: state2.permissions.clone(),
             project_root: session2.project_root.clone(),
             ask_user: Arc::new(PendingPrompt::new(state2.clone())),
+            guard: session2.guard.clone(),
         };
         let mut inbox = session2.inbox.lock().await;
         if let Err(e) = run_turn(&ctx, &text, &mut inbox).await {

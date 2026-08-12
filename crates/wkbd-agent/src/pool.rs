@@ -91,6 +91,43 @@ pub struct AgentPool {
     processes: Mutex<HashMap<ProcessKey, PooledProcess>>,
     incoming: mpsc::UnboundedSender<(ProcessKey, Incoming)>,
     raw_sink: Option<mpsc::UnboundedSender<(ProcessKey, RawFrame)>>,
+    /// Where spawned processes are recorded so the next boot can find them.
+    ///
+    /// The third layer of cleanup, and the only one that covers a hard crash: the other two —
+    /// a death signal to the child and a group kill from the parent — both need this process to
+    /// still be running, or at least to be unwinding. Without a registry that something actually
+    /// writes to, the boot-side sweep reads an empty file forever and the layer exists only in
+    /// the code.
+    registry: Option<std::path::PathBuf>,
+}
+
+/// Makes a child killable and self-terminating.
+///
+/// Two of the three cleanup layers are installed here, and each covers what the other misses.
+///
+/// The process group means one `killpg` takes the agent and anything it spawned. An agent that
+/// forks — and they do, to run builds and test suites — leaves children that a kill aimed at the
+/// agent alone does not touch.
+///
+/// The death signal means a child dies with us even if we never get to run any cleanup, which is
+/// what happens on `SIGKILL` or a panic that aborts. It only reaches direct children, so it does
+/// not replace the group kill; it covers the case where there is nobody left to perform one.
+fn harden_lifetime(cmd: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+        let parent = std::process::id();
+        unsafe {
+            cmd.pre_exec(move || {
+                wkbd_sec::reaper::arm_child_death_signal(parent)?;
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = cmd;
+    }
 }
 
 impl AgentPool {
@@ -98,7 +135,18 @@ impl AgentPool {
         incoming: mpsc::UnboundedSender<(ProcessKey, Incoming)>,
         raw_sink: Option<mpsc::UnboundedSender<(ProcessKey, RawFrame)>>,
     ) -> Self {
-        Self { processes: Mutex::new(HashMap::new()), incoming, raw_sink }
+        Self {
+            processes: Mutex::new(HashMap::new()),
+            incoming,
+            raw_sink,
+            registry: None,
+        }
+    }
+
+    /// Records spawned processes at this path so a later boot can sweep them.
+    pub fn with_registry(mut self, path: std::path::PathBuf) -> Self {
+        self.registry = Some(path);
+        self
     }
 
     pub fn key_for(spec: &AgentSpec, config: &LaunchConfig) -> ProcessKey {
@@ -122,7 +170,8 @@ impl AgentPool {
             }
         }
 
-        let cmd = build_command(spec, config);
+        let mut cmd = build_command(spec, config);
+        harden_lifetime(&mut cmd);
 
         // Fan the per-process channels into the pool-wide ones, tagging with the key so
         // the daemon can tell which process a message came from.
@@ -155,6 +204,16 @@ impl AgentPool {
 
         let conn = Arc::new(Connection::spawn(cmd, tx_in, raw_tx).await?);
 
+        if let (Some(registry), Some(pid)) = (&self.registry, conn.id().await) {
+            // The child is its own group leader, so the group id is the pid. Recorded after the
+            // spawn rather than before, because there is nothing to record until there is a pid,
+            // and a crash in the window between them leaves a process the sweep will not find —
+            // which is why the sweep is the third layer and not the first.
+            if let Err(e) = wkbd_sec::reaper::record_spawned(registry, pid, pid, &spec.id) {
+                tracing::warn!(error = %e, pid, "could not record a spawned agent");
+            }
+        }
+
         let mut procs = self.processes.lock().await;
         // Another task may have raced us here; keep whichever landed first so we never
         // hold two processes for one key.
@@ -177,16 +236,33 @@ impl AgentPool {
         if p.sessions == 0 {
             if let Some(p) = procs.remove(key) {
                 drop(procs);
-                p.conn.kill().await?;
+                self.kill_and_forget(&p.conn).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn kill_and_forget(&self, conn: &Arc<Connection>) -> Result<()> {
+        let pid = conn.id().await;
+        conn.kill().await?;
+        if let (Some(registry), Some(pid)) = (&self.registry, pid) {
+            // Removed only after the kill has been waited on. Forgetting first would leave a live
+            // process with no record of it anywhere, which is the one state the registry exists to
+            // prevent.
+            if let Err(e) = wkbd_sec::reaper::forget_spawned(registry, pid) {
+                tracing::debug!(error = %e, pid, "could not drop a registry entry");
             }
         }
         Ok(())
     }
 
     pub async fn shutdown(&self) {
-        let mut procs = self.processes.lock().await;
-        for (key, p) in procs.drain() {
-            if let Err(e) = p.conn.kill().await {
+        let drained: Vec<(ProcessKey, PooledProcess)> = {
+            let mut procs = self.processes.lock().await;
+            procs.drain().collect()
+        };
+        for (key, p) in drained {
+            if let Err(e) = self.kill_and_forget(&p.conn).await {
                 tracing::warn!(agent = %key.agent_id, error = %e, "failed to kill agent");
             }
         }

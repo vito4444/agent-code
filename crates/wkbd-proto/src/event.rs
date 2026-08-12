@@ -240,6 +240,33 @@ pub enum EventPayload {
     AgentError { message: String },
     /// Emitted by the supervisor, not the agent.
     AgentExited { code: Option<i32>, signal: Option<i32> },
+
+    /// The agent asked us to read or write a file on its behalf.
+    ///
+    /// Recorded for every attempt, allowed or refused. The protocol has the client perform real
+    /// disk I/O with an absolute path the agent chose and defines no boundary of its own, which
+    /// makes this the shortest route around every other check in the system. Enforcement that
+    /// leaves no record is enforcement nobody can audit, and a refusal is often the most
+    /// interesting thing in a transcript.
+    FileAccess {
+        op: FileOp,
+        /// What the agent asked for, verbatim, before any resolution.
+        requested: String,
+        /// Where it actually resolved to, when it was allowed.
+        resolved: Option<String>,
+        allowed: bool,
+        /// A stable classification when refused: `outside-root`, `symlink-encountered`,
+        /// `parent-traversal` and so on.
+        refusal: Option<String>,
+        bytes: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileOp {
+    Read,
+    Write,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

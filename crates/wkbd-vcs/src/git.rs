@@ -22,9 +22,17 @@
 //! repository — including the ones that write objects. What this does is remove the
 //! variables that can redirect git; it deliberately does not build an environment from
 //! nothing, because these invocations are the daemon's own and the user's global git
-//! configuration (credential helpers, `include.path`) has to keep working. Git commands
-//! run *on behalf of an agent* are a different threat model and belong behind
-//! `wkbd-sec::git_env`, not here.
+//! configuration (identity, credential helpers) has to keep working. Git commands run
+//! *on behalf of an agent* are a different threat model and are built from nothing by
+//! `wkbd-sec::git_env`.
+//!
+//! Keeping the user's configuration does mean keeping a channel an agent can reach,
+//! though, and that is the part which is easy to under-read: `.git/config` is shared by
+//! every worktree of a repository (docs/M0-FINDINGS.md §2.2), so a value an agent writes
+//! there is read by *these* invocations too, not only by its own. Overriding two keys is
+//! not enough for that. So the dangerous-key list comes from
+//! `wkbd_sec::git_env::hardening_args`, which is also what agent-facing invocations use:
+//! one list, so the two cannot drift apart and leave this side the weaker of the two.
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
@@ -32,10 +40,19 @@ use std::process::Command;
 
 use crate::error::{Result, VcsError};
 
-/// Prepended to every argument list. `-c` settings win over both the repository config
-/// and the user's global config, which is what we want: an agent that writes
-/// `core.hooksPath` into the shared `.git/config` must not be able to re-enable hooks.
-const HARDENING: [&str; 4] = ["-c", "core.hooksPath=/dev/null", "-c", "core.quotePath=false"];
+/// Prepended to every argument list, ahead of the subcommand. `-c` settings win over both
+/// the repository config and the user's global config, which is what we want: an agent
+/// that writes `core.hooksPath` into the shared `.git/config` must not be able to
+/// re-enable hooks.
+///
+/// The list itself is `wkbd-sec`'s, plus `core.quotePath=false` which only this side needs
+/// because only this side parses paths out of git's output.
+fn hardening() -> Vec<OsString> {
+    let mut out = wkbd_sec::git_env::hardening_args();
+    out.push(OsString::from("-c"));
+    out.push(OsString::from("core.quotePath=false"));
+    out
+}
 
 #[derive(Debug)]
 pub(crate) struct GitOutput {
@@ -99,7 +116,7 @@ pub(crate) fn run_with_env<S: AsRef<OsStr>>(
     let invocation = describe(args);
     let mut cmd = Command::new("git");
     cmd.current_dir(cwd);
-    cmd.args(HARDENING.iter().map(OsStr::new));
+    cmd.args(hardening());
     for a in args {
         cmd.arg(a.as_ref());
     }
@@ -283,5 +300,57 @@ mod tests {
         assert!(looks_like_oid(&"a".repeat(64)));
         assert!(!looks_like_oid("merge-tree: nosuchref - not something we can merge"));
         assert!(!looks_like_oid(""));
+    }
+}
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+
+    /// The seam between this crate and the security layer.
+    ///
+    /// Both sides harden git invocations, and they used to carry separate lists: this one had
+    /// two entries and the other had eleven. Two lists drift, and the way they drift is that
+    /// somebody adds a newly-discovered dangerous key to the agent-facing side and this side —
+    /// which runs with the user's own configuration visible — stays behind. So the assertion is
+    /// not "these keys are present" but "this side carries everything that side does".
+    #[test]
+    fn every_key_the_security_layer_hardens_is_hardened_here_too() {
+        let ours: Vec<String> = hardening()
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        let theirs: Vec<String> = wkbd_sec::git_env::hardening_args()
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        assert!(!theirs.is_empty(), "the security layer must harden something");
+        for entry in &theirs {
+            assert!(
+                ours.contains(entry),
+                "the security layer hardens {entry:?} and this side does not; two lists have \
+                 drifted and this is the weaker side, because it runs with the user's own git \
+                 configuration visible"
+            );
+        }
+    }
+
+    #[test]
+    fn paths_are_not_quoted_because_this_side_parses_them() {
+        let ours: Vec<String> = hardening()
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(ours.contains(&"core.quotePath=false".to_string()));
+    }
+
+    #[test]
+    fn hooks_are_disabled_because_worktree_add_runs_post_checkout() {
+        let ours: Vec<String> = hardening()
+            .iter()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(ours.contains(&"core.hooksPath=/dev/null".to_string()));
     }
 }

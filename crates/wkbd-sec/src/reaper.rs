@@ -882,6 +882,69 @@ pub fn pid_is_running(pid: u32) -> bool {
     }
 }
 
+/// Installs the child-side death signal. Must be called from inside `pre_exec`.
+///
+/// Exposed separately from [`Supervisor::spawn_supervised`] because a caller that needs piped
+/// stdio for a protocol conversation builds its own command and cannot hand it over — and it
+/// still needs this, since without it a child survives a `SIGKILL`ed daemon indefinitely.
+///
+/// Everything it does must be async-signal-safe: between `fork` and `exec` the child shares the
+/// parent's address space and may not allocate or take locks.
+#[cfg(unix)]
+pub fn arm_child_death_signal(parent_pid: u32) -> io::Result<()> {
+    unsafe {
+        #[cfg(target_os = "linux")]
+        if libc::prctl(
+            libc::PR_SET_PDEATHSIG,
+            libc::SIGKILL as libc::c_ulong,
+            0 as libc::c_ulong,
+            0 as libc::c_ulong,
+            0 as libc::c_ulong,
+        ) != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // The race the signal cannot close by itself: if the parent died between fork and the
+        // call above then the signal was already not sent and never will be, so the child has to
+        // notice on its own and leave.
+        if libc::getppid() != parent_pid as libc::pid_t {
+            libc::_exit(EXIT_PARENT_ALREADY_GONE);
+        }
+    }
+    Ok(())
+}
+
+/// Records a process this daemon spawned, so the next boot can find it if we die badly.
+///
+/// Separate from [`Supervisor::spawn_supervised`] because a caller that needs piped stdio for a
+/// protocol conversation builds its own command and cannot hand it over. Without this the
+/// boot-side sweep reads an empty registry forever, and the third layer of cleanup — the one that
+/// covers a hard crash — is present in the code and absent in effect.
+pub fn record_spawned(
+    registry_path: &Path,
+    pid: u32,
+    pgid: u32,
+    label: &str,
+) -> Result<(), ReaperError> {
+    let _ = label;
+    // A process that is already gone needs no entry, and recording one would leave a stale row
+    // that the next boot has to reason about for nothing.
+    let Some(identity) = ProcessIdentity::of_pid(pid) else {
+        return Ok(());
+    };
+    let registry = Registry { path: registry_path.to_path_buf(), lock: Mutex::new(()) };
+    registry.insert(RegistryEntry { identity, pgid })
+}
+
+/// Drops a process from the registry after it has been reaped.
+///
+/// Best effort by nature: a stale entry costs one identity check on the next boot, which is
+/// exactly the check that exists to make stale entries harmless.
+pub fn forget_spawned(registry_path: &Path, pid: u32) -> Result<(), ReaperError> {
+    let registry = Registry { path: registry_path.to_path_buf(), lock: Mutex::new(()) };
+    registry.remove(pid)
+}
+
 impl Registry {
     fn insert(&self, entry: RegistryEntry) -> Result<(), ReaperError> {
         let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());

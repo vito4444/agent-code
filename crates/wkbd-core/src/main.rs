@@ -13,6 +13,7 @@
 //! that eventually stops the restore from being attempted at all.
 
 mod api;
+mod fs_bridge;
 mod runner;
 mod state;
 
@@ -52,6 +53,14 @@ struct Cli {
     /// Start without restoring anything from the previous run.
     #[arg(long)]
     safe_mode: bool,
+
+    /// Do not offer `fs/read_text_file` and `fs/write_text_file` to agents.
+    ///
+    /// Not the safe option, despite looking like one. An agent that cannot ask us to read a file
+    /// reads it itself, in its own process, and we see nothing and enforce nothing. Offering it
+    /// puts every access behind a kernel-decided boundary and into the event log.
+    #[arg(long)]
+    no_client_fs: bool,
 }
 
 #[tokio::main]
@@ -133,7 +142,10 @@ async fn main() -> Result<()> {
 
     let (incoming_tx, incoming_rx) = mpsc::unbounded_channel();
     let (raw_tx, raw_rx) = mpsc::unbounded_channel();
-    let pool = Arc::new(AgentPool::new(incoming_tx, Some(raw_tx)));
+    // The registry is what makes the boot-side sweep above mean anything: it reads this file, so
+    // something has to write it. Without this the third cleanup layer is present in the code and
+    // absent in effect.
+    let pool = Arc::new(AgentPool::new(incoming_tx, Some(raw_tx)).with_registry(registry.clone()));
     let prelude = wkbd_memory::prelude_provider(store.clone());
     let factory = SessionFactory::new(pool.clone(), prelude);
 
@@ -153,6 +165,7 @@ async fn main() -> Result<()> {
         events: events_tx,
         raw: Mutex::new(Vec::new()),
         degraded: opened.degraded.clone(),
+        offer_client_fs: !cli.no_client_fs,
         state_dir: state_dir.clone(),
         pending_permissions: Mutex::new(Default::default()),
     });

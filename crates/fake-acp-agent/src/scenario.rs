@@ -19,6 +19,11 @@ pub enum Step {
     Sleep(u64),
     /// Terminate the process mid-turn without answering the prompt.
     Die,
+    /// Send a request to the client and wait for its answer.
+    ///
+    /// `{ROOT}` in any string value is replaced with the session's working directory, so a
+    /// scenario can name paths relative to wherever the test put the repository.
+    Request { method: String, params: Value, label: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +46,13 @@ pub enum Profile {
     Flood,
     /// Exits mid-turn, leaving the prompt request unanswered.
     Crash,
+    /// Exercises client-side file access, including four attempts to leave the workspace.
+    ///
+    /// The escapes are the point. A path guard with passing unit tests says the guard is correct;
+    /// it says nothing about whether the daemon wired it into the protocol path, and "the
+    /// capability was declared but the check was skipped" looks exactly like success from
+    /// outside.
+    FsProbe,
 }
 
 impl std::str::FromStr for Profile {
@@ -54,6 +66,7 @@ impl std::str::FromStr for Profile {
             "alien" => Profile::Alien,
             "flood" => Profile::Flood,
             "crash" => Profile::Crash,
+            "fsprobe" => Profile::FsProbe,
             other => return Err(format!("unknown profile: {other}")),
         })
     }
@@ -137,8 +150,71 @@ impl Profile {
                 Step::Sleep(30),
                 Step::Die,
             ],
+            Profile::FsProbe => fs_probe(),
         }
     }
+}
+
+/// Reads and writes through the client, then tries to leave the workspace four ways.
+///
+/// Each escape is a published defect shape rather than an invented one: an absolute path outside
+/// the roots, a symlink inside the roots pointing out, a symlink as an intermediate component, and
+/// a sibling directory whose name begins with an allowed root's name.
+fn fs_probe() -> Vec<Step> {
+    vec![
+        Step::Emit(thought(Some("m1"), "reading a file the honest way")),
+        Step::Request {
+            method: "fs/read_text_file".into(),
+            params: json!({ "path": "{ROOT}/inside.txt" }),
+            label: "read-inside".into(),
+        },
+        Step::Request {
+            method: "fs/write_text_file".into(),
+            params: json!({
+                "path": "{ROOT}/written-by-agent.txt",
+                "content": "written through the client\n"
+            }),
+            label: "write-inside".into(),
+        },
+        // The protocol requires the client to create a file that does not exist, so this is the
+        // normal path and not an edge case — and it is the condition under which the published
+        // defects in this area triggered.
+        Step::Request {
+            method: "fs/write_text_file".into(),
+            params: json!({
+                "path": "{ROOT}/nested/new.txt",
+                "content": "created on demand\n"
+            }),
+            label: "write-missing-parent".into(),
+        },
+        Step::Emit(thought(Some("m2"), "now trying to get out")),
+        Step::Request {
+            method: "fs/read_text_file".into(),
+            params: json!({ "path": "/etc/passwd" }),
+            label: "escape-absolute".into(),
+        },
+        Step::Request {
+            method: "fs/read_text_file".into(),
+            params: json!({ "path": "{ROOT}/escape-link" }),
+            label: "escape-symlink".into(),
+        },
+        Step::Request {
+            method: "fs/read_text_file".into(),
+            params: json!({ "path": "{ROOT}/via/link/secret.txt" }),
+            label: "escape-symlink-component".into(),
+        },
+        Step::Request {
+            method: "fs/read_text_file".into(),
+            params: json!({ "path": "{ROOT}_evil/secret.txt" }),
+            label: "escape-prefix".into(),
+        },
+        Step::Request {
+            method: "fs/write_text_file".into(),
+            params: json!({ "path": "/tmp/wkbd-should-not-exist", "content": "pwned\n" }),
+            label: "escape-write".into(),
+        },
+        Step::Emit(message(Some("m3"), "finished probing")),
+    ]
 }
 
 pub fn thought(message_id: Option<&str>, text: &str) -> Value {

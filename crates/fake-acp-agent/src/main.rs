@@ -55,6 +55,22 @@ struct Cli {
     pollute_stdout: bool,
 }
 
+/// Replaces `{ROOT}` in every string value with the session's working directory.
+fn substitute_root(params: &Value, cwd: &str) -> Value {
+    match params {
+        Value::String(s) => Value::String(s.replace("{ROOT}", cwd)),
+        Value::Array(items) => {
+            Value::Array(items.iter().map(|i| substitute_root(i, cwd)).collect())
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), substitute_root(v, cwd)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn loose_bool(s: &str) -> Result<bool, String> {
     match s.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
@@ -67,6 +83,9 @@ struct Session {
     profile: Profile,
     config: HashMap<String, Value>,
     cancelled: bool,
+    /// The working directory the client gave us at `session/new`. Scenarios substitute it for
+    /// `{ROOT}` so they can name paths without knowing where the test put the repository.
+    cwd: String,
 }
 
 struct State {
@@ -178,7 +197,13 @@ async fn main() -> Result<()> {
                     let model = s.cli.model.clone();
                     let mut config = HashMap::new();
                     config.insert("model".to_string(), json!(model));
-                    s.sessions.insert(sid.clone(), Session { profile, config, cancelled: false });
+                    let cwd = params
+                        .get("cwd")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("/")
+                        .to_string();
+                    s.sessions
+                        .insert(sid.clone(), Session { profile, config, cancelled: false, cwd });
                     (sid, profile.config_options())
                 };
                 if let Some(id) = id {
@@ -245,6 +270,14 @@ async fn main() -> Result<()> {
                     })
                     .unwrap_or_default();
 
+                let cwd = state
+                    .lock()
+                    .unwrap()
+                    .sessions
+                    .get(&sid)
+                    .map(|s| s.cwd.clone())
+                    .unwrap_or_else(|| "/".to_string());
+
                 let (profile, delay) = {
                     let mut s = state.lock().unwrap();
                     if let Some(sess) = s.sessions.get_mut(&sid) {
@@ -262,7 +295,7 @@ async fn main() -> Result<()> {
                 let sid2 = sid.clone();
                 ACTIVE_TURNS.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
-                    let stop = run_script(st, &sid2, profile, &prompt_text, delay).await;
+                    let stop = run_script(st, &sid2, profile, &prompt_text, delay, &cwd).await;
                     if let Some(id) = id {
                         respond(&id, json!({ "stopReason": stop }));
                     }
@@ -297,6 +330,7 @@ async fn run_script(
     profile: Profile,
     prompt: &str,
     delay_ms: u64,
+    cwd: &str,
 ) -> &'static str {
     let steps = profile.script(prompt);
 
@@ -372,6 +406,34 @@ async fn run_script(
             Step::Die => {
                 eprintln!("fake-acp-agent: exiting mid-turn on purpose");
                 std::process::exit(7);
+            }
+            Step::Request { method, params, label } => {
+                let params = substitute_root(&params, cwd);
+                let req_id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+                state.lock().unwrap().pending_permission = Some(req_id);
+
+                let mut full = params;
+                full["sessionId"] = json!(session_id);
+                write_line(&json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "method": method,
+                    "params": full
+                }));
+
+                // The answer is reported on stderr rather than swallowed. Whether the client
+                // allowed or refused is the entire finding for a probing scenario, and a double
+                // that hides it would let a broken boundary look like a working one.
+                for _ in 0..600 {
+                    {
+                        let s = state.lock().unwrap();
+                        if s.pending_permission.is_none() {
+                            break;
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                eprintln!("fake-acp-agent: {label} answered");
             }
         }
     }

@@ -39,6 +39,9 @@ pub struct TurnContext {
     /// what an unattended daemon returns, which is why the default answer is refusal
     /// rather than approval.
     pub ask_user: Arc<dyn AskUser>,
+    /// Enforces the boundary for file access performed on the agent's behalf. `None` means the
+    /// capability was not offered, so a request for it is a protocol error rather than a refusal.
+    pub guard: Option<Arc<wkbd_sec::path_guard::PathGuard>>,
 }
 
 /// Routes a permission question to whoever answers it.
@@ -240,11 +243,14 @@ async fn handle_incoming(ctx: &TurnContext, msg: Incoming) -> Vec<EventPayload> 
         Incoming::Notification { .. } => Vec::new(),
         Incoming::Request { id, method, params, .. } => match method.as_str() {
             "session/request_permission" => begin_permission(ctx, id, params).await,
-            // fs/* and terminal/* are the interfaces where an unsandboxed client executes
-            // work on the agent's behalf, which makes them the shortest path around every
-            // permission check in the system. They are refused until the path guard and the
-            // sandbox are wired in, and refusing is the safe default: an agent that cannot
-            // read a file through us will read it itself, inside its own sandbox.
+            "fs/read_text_file" | "fs/write_text_file" => {
+                handle_fs(ctx, id, &method, params).await
+            }
+            // terminal/* is the other interface where an unsandboxed client acts for the agent.
+            // Unlike fs/*, there is nothing behind it yet: a terminal means spawning a process
+            // with an agent-chosen command line, and the process supervisor is wired for agents
+            // rather than for arbitrary commands. Refusing is honest; the agent runs the command
+            // itself, in its own sandbox, exactly as it would if we had never offered.
             other => {
                 let _ = ctx
                     .handle
@@ -377,6 +383,53 @@ async fn begin_permission(ctx: &TurnContext, id: Value, params: Value) -> Vec<Ev
     });
 
     out
+}
+
+/// Performs a file operation on the agent's behalf, records it, and answers.
+///
+/// The boundary decision is entirely `wkbd-sec::path_guard`'s; nothing here re-implements any part
+/// of it. What happens here is the conversion between a protocol request and an audit record, and
+/// the one policy decision that cannot live in the guard: a request for a capability we never
+/// offered is a protocol error, not a refusal, because the agent should not have asked.
+async fn handle_fs(
+    ctx: &TurnContext,
+    id: Value,
+    method: &str,
+    params: Value,
+) -> Vec<EventPayload> {
+    let Some(guard) = &ctx.guard else {
+        let _ = ctx
+            .handle
+            .connection()
+            .respond_error(
+                &id,
+                -32601,
+                &format!("{method} was not offered by this client"),
+            )
+            .await;
+        return Vec::new();
+    };
+
+    let outcome = if method == "fs/read_text_file" {
+        crate::fs_bridge::read_text_file(guard, &params)
+    } else {
+        crate::fs_bridge::write_text_file(guard, &params)
+    };
+
+    match outcome.reply {
+        Ok(result) => {
+            if let Err(e) = ctx.handle.connection().respond(&id, result).await {
+                tracing::warn!(error = %e, "could not answer a file request");
+            }
+        }
+        Err((code, message)) => {
+            if let Err(e) = ctx.handle.connection().respond_error(&id, code, &message).await {
+                tracing::warn!(error = %e, "could not refuse a file request");
+            }
+        }
+    }
+
+    vec![outcome.event]
 }
 
 /// Canonical bytes for a permission decision.

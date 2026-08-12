@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# For the dangerous-git-config list only. Two copies of that list would drift, and this
+# side would end up the weaker one.
+wkbd-sec.workspace = true
 # Glob matching is load-bearing for three separate decisions (which files an agent was
 # allowed to touch, which files get carried into a fresh worktree, which files the
 # acceptance harness must be able to restore). A hand-rolled matcher that gets `**`
