@@ -416,9 +416,14 @@ default parameter, losing its binding to `window`.
 
 Everything here is either untested or rests on a source rather than a measurement.
 
-- Screenshots of Copilot's interface were obtained late and only partially; the footer slot order
-  in [UI-SPEC.md](UI-SPEC.md) is still derived from source and release notes, and is kept in one
-  constant so it can be corrected in one place.
+- Screenshots of Copilot's interface were obtained and are archived in
+  [`docs/reference/copilot/`](reference/copilot/README.md). They settle the footer slot order,
+  which was the one thing source could not give. They are of mixed vintage — the model name in
+  the input box is two years old and the surface has been reorganized since — so they are
+  evidence about layout conventions, not about the current build.
+- **The inline diff treatment remains unverified.** The documentation describes the in-editor
+  overlay without illustrating it, so that part of [UI-SPEC.md](UI-SPEC.md) comes from theme
+  tokens and release-note text rather than from a picture.
 - Every performance figure quoted in a comment comes from someone else's measurement. None was
   reproduced here.
 - The claim that only-read tests reduce test tampering to near zero comes from a cited benchmark,

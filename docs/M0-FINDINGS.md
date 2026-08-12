@@ -238,15 +238,34 @@ claim that the Tauri shell is usable on Linux.
 
 ## 5. Copilot screenshot archive (m0-screenshots)
 
-**Status: not obtained. The interface spec is built on source rather than pixels.**
+**Status: obtained. Six screenshots archived in `docs/reference/copilot/`.**
 
-Fetching tooling on this machine strips images, so no screenshots were captured. The
-numbers in `docs/UI-SPEC.md` therefore come from the MIT-licensed `microsoft/vscode`
-source (`src/vs/workbench/contrib/chat/`) and from versioned release notes, which is a
-stronger source for exact values than measuring a screenshot would be.
+The numbers in `docs/UI-SPEC.md` come from the MIT-licensed `microsoft/vscode` source
+(`src/vs/workbench/contrib/chat/`) and from versioned release notes, which is a stronger
+source for exact values than measuring a screenshot would be. Source is weaker for exactly
+one thing: the left-to-right ordering of the controls inside the input box, because CSS gives
+the class names and not the order.
 
-It is a weaker source for one specific thing: the left-to-right ordering and iconography
-of the controls inside the chat input box. `docs/UI-SPEC.md` marks those items as
-unverified, and the implementation keeps the footer row order in a single constant
-(`ui/src/components/composer/footerOrder.ts`) so it can be corrected in one place once
-screenshots exist.
+That is now settled. Observed:
+
+```
+left:   [+ add context] [@ attach] [Agent ▼ mode]
+right:  [model name ▼] [High] [200K] [settings] [send]
+```
+
+Mode on the left, model on the right, send rightmost, and the thinking level and context size
+immediately beside the model name. Above the input rather than inside it: the changed-files
+list, collapsed to `1 file changed +67 -0`, with **Keep** in accent blue and **Undo** in grey.
+While a request runs, the send control becomes `Stop and Send` / `Add to Queue` /
+`Steer with Message`. Reasoning is a vertical stack of named collapsible phases, each with a
+green check when done. Tool approval offers the remembering scope at the moment of approval —
+"Allow in this Session", "Allow in this Workspace", "Always Allow" — rather than as prior
+configuration.
+
+**Caveat on vintage.** The model name visible in the input box is a 2025-era model, so some of
+these are two years old and the surface has since been reorganized into two surfaces rather than
+one panel. They are evidence about layout conventions, not about the current build.
+
+**Still not obtained: the in-editor inline diff overlay.** The documentation describes it and
+does not illustrate it, so that part of `docs/UI-SPEC.md` remains derived from theme tokens and
+release-note text.

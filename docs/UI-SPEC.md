@@ -151,8 +151,16 @@ inline and potentially many times in one transcript.
 ### 2.5 Permission card
 
 Rendered inline in the transcript at the point the agent asked, so the reader can see what it was
-doing when it asked. A modal loses that, and an approval given without context is the approval
-most likely to be wrong.
+doing when it asked. Copilot uses a modal for this; a modal loses the context, and an approval
+given without context is the approval most likely to be wrong.
+
+One convention worth borrowing, visible in
+[`copilot-tool-approval-dialog.webp`](reference/copilot/copilot-tool-approval-dialog.webp): the
+remembering scope is chosen *at the moment of approval* — "Allow in this Session", "Allow in this
+Workspace", "Always Allow" — rather than configured beforehand. Ours takes the options the agent
+offers, which today means the protocol's four kinds, and applies its own scope policy on top; the
+scope is therefore implied by which option was chosen rather than picked separately. Making it
+explicit is worth doing once there is more than one plausible scope for a given decision.
 
 Once answered it collapses to the chosen option. A decision that came from a remembered choice
 is badged `remembered`, with a tooltip stating that the decision is bound to the exact content of
@@ -190,9 +198,22 @@ thing and the row becomes cramped.
 
 #### Footer slots
 
-Order is kept in one constant, [`footerOrder.ts`](../ui/src/components/composer/footerOrder.ts),
-because it is the least certain part of this specification: it was derived from source and
-release notes rather than from screenshots.
+Order is kept in one constant,
+[`footerOrder.ts`](../ui/src/components/composer/footerOrder.ts).
+
+It was originally derived from source and release notes, which give the CSS classes but not the
+order. Screenshots since obtained (archived in
+[`docs/reference/copilot/`](reference/copilot/README.md)) settle it:
+
+```
+Copilot, left:   [+ add context] [@ attach] [Agent ▼ mode]
+Copilot, right:  [model name ▼] [High] [200K] [settings] [send]
+```
+
+Mode on the left, model on the right, send rightmost, and the thinking level and the context
+size sit immediately beside the model name rather than anywhere else. Ours follows the same
+conventions — an identity on the left, model and thinking level adjacent, context beside them,
+send last — so the order below stands as written rather than being a guess.
 
 ```
 agent · model ⌄ · thought level ⌄ · other config · context ring · send
@@ -215,15 +236,17 @@ no options and reports no usage, three of these disappear.
 
 Idle: one `Send` button.
 
-Busy: **two actions, not three.**
+Busy: **two actions, not three.** Copilot offers three — `Stop and Send`, `Add to Queue`, and
+`Steer with Message` — and this is the one place the family resemblance is deliberately broken.
 
 - `Add to queue` — held until the turn ends. Nothing is interrupted.
 - `Stop and send` — cancels the turn, discarding work in flight, then sends.
 
-There is deliberately no `Steer` that interrupts at the next convenient moment. The protocol has
-no way to inject a message into a running turn; the proposal for it is unmerged and has no owner.
-A steer control could therefore only be a queue with a different label or a cancel pretending to
-be gentler. It appears only when the connected agent declares support, which today no agent does.
+There is deliberately no `Steer` that interrupts at the next convenient moment. Copilot can offer
+it because Copilot's agent is Copilot's own; over this protocol there is no way to inject a message
+into a running turn, and the proposal for one is unmerged and unowned. A steer control here could
+therefore only be a queue with a different label or a cancel pretending to be gentler. It appears
+only when the connected agent declares support, which today no agent does.
 
 Queued messages say when they will be delivered ("will be sent when this turn ends") and can be
 withdrawn. That part is honest: the message never left this process.
@@ -244,6 +267,11 @@ Hover gives the token counts, the cumulative cost when the agent reports one, an
 "Reported by the agent. This client does not estimate context usage."
 
 Level thresholds: normal below 75%, warning at 75%, critical at 90%.
+
+Copilot shows this as a plain `200K` label beside the model name — the window size rather than the
+proportion used. A ring is a deliberate difference: the number a reader glances at between two
+messages is how full the window is, not how large it is, and a proportion is only honest when the
+agent reports both halves. Hence a ring when there are two halves, and nothing when there are not.
 
 ### 2.9 User rules screen
 
@@ -288,8 +316,10 @@ success green for inbound. Measured: 18×18px, 13px glyph, `rgb(9,105,218)` and 
 
 ## 4. Known gaps
 
-- **Footer slot order is unverified against a screenshot.** Derived from source and release notes.
-  Kept in one constant so it is a one-line correction.
+- **The inline diff treatment is still unverified against a screenshot.** The documentation
+  describes the in-editor overlay but does not illustrate it, so what is specified here comes from
+  theme tokens and release-note text. Everything else in this file is either measured in the
+  running interface or cited to a published source.
 - **No full-screen review surface yet.** The inline diff links to one that does not exist.
 - **No terminal emulator.** `terminal/*` is refused by the client, so embedded terminal content
   reports that rather than showing output. The renderer defaults to canvas rather than WebGL on
