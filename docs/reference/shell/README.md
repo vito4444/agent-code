@@ -21,6 +21,35 @@ things that are easy to get wrong and are visible here:
 `tauri-linux-empty.png` is the same shell with no session open, which is the state that shows the
 autonomy selector sitting above the input box rather than in the row with the per-moment controls.
 
+`run-view.png` is one orchestrated run, and it is the densest of these. Four things in it are the
+whole argument for the orchestrator, and each is visible rather than asserted:
+
+- **The plan the validator rejected is shown, with its reason in full.** The model's first graph left
+  one task connected to nothing, and the run redrafted. Hiding the rejected attempt would leave a
+  reader unable to tell a planner that got it right first time from one that took three tries.
+- **Waves express parallelism, and the header says where it came from.** "2 in parallel from the base
+  commit", then "1 in parallel, after wave 1". No heuristic decides what is safe to run together; the
+  edges do.
+- **A dependency edge is shown as commit folding**: `wkbd/feature-a starts at 0d99b9c, which folds in
+  8112576, b35347d`. The dependent task's worktree already contains what its dependencies produced.
+  This is the line that distinguishes an edge carrying work from an edge carrying a summary of work,
+  and it is why the acceptance check for that task can require its dependencies' files.
+- **The merge gate explains itself.** "Acceptance proved that the assertions each task named pass. It
+  did not prove the change is the one you asked for, and a named test suite is the easiest thing in a
+  run to satisfy the wrong way." A gate whose reason is invisible gets clicked through.
+
+`run-list.png` shows a finished run as `AWAITING MERGE`, `3/3 tasks complete`, `waiting for you to
+merge` — the status a run sits in indefinitely rather than a spinner that resolves itself.
+
+`user-rules.png` states the rule/memory separation in the interface rather than only in the code:
+"passed through verbatim, they are never rewritten, and nothing in the learning system can retire
+them."
+
+`worker-transcript.png` is a worker session's own conversation, which is worth a look because it shows
+exactly what a dispatched agent is told: the paths it may change, the assertions that will judge it,
+and the paths that are read-only and will be restored if it changes them. A worker that does not know
+which tests decide its fate optimises for looking finished.
+
 ## Two corrections to earlier claims
 
 The handoff document said the shell could not be built here because `webkit2gtk` was unavailable.
