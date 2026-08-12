@@ -35,6 +35,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/runs/{id}", get(get_run))
         .route("/api/runs/{id}/merge", post(merge_run))
         .route("/api/runs/{id}/abandon", post(abandon_run))
+        .route("/api/proposals", get(list_proposals))
+        .route("/api/proposals/{id}", get(review_proposal))
+        .route("/api/proposals/{id}/approve", post(approve_proposal))
+        .route("/api/proposals/{id}/reject", post(reject_proposal))
         .route("/api/rules", get(list_rules).post(create_rule))
         .route("/api/rules/{id}", delete(delete_rule))
         .route("/api/raw", get(raw_frames))
@@ -163,6 +167,111 @@ async fn prompt(
         *session2.busy.lock().await = false;
     });
 
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// The queue of things the system wants to tell itself.
+///
+/// Nothing here is in effect. That is the point: the system's own instructions are the highest-value
+/// target for an injection, and a run's transcript contains text from tools, files and possibly a
+/// hostile repository. So they arrive as proposals with their evidence and wait.
+async fn list_proposals(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, ApiError> {
+    let pending = wkbd_evolve::proposals::pending(&state.store)
+        .await
+        .map_err(ApiError::internal)?;
+    let items: Vec<serde_json::Value> = pending
+        .iter()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "kind": p.kind.as_str(),
+                "scope": p.scope,
+                "risk": p.risk.as_str(),
+                "created_ms": p.created_ms,
+                // Not the body. A list is skim-read, and the body is the part that has to be read
+                // carefully with the invisible characters already stripped — which is what the
+                // review endpoint does. Putting raw bodies in a list invites approving from the list.
+                "requires_distinct_confirmation": p.requires_distinct_confirmation(),
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "proposals": items })))
+}
+
+/// One proposal, prepared for a human to read.
+///
+/// The body comes back with invisible characters removed and a summary of what was removed, because
+/// a reviewer cannot consent to text they cannot see. The content hash comes back too and has to be
+/// handed to the approval: an edit that lands between rendering and clicking invalidates the click
+/// rather than being carried along by it.
+async fn review_proposal(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let p = wkbd_evolve::proposals::present_for_review(&state.store, &id)
+        .await
+        .map_err(|e| ApiError { status: StatusCode::NOT_FOUND, message: e.to_string() })?;
+    Ok(Json(json!({
+        "id": p.id,
+        "kind": p.kind.as_str(),
+        "scope": p.scope,
+        "risk": p.risk.as_str(),
+        "content_hash": p.content_hash,
+        "body_for_human": p.body_for_human,
+        "hidden_summary": p.hidden_summary,
+        // Each removal located precisely, because "we removed 3 invisible characters" is not
+        // reviewable: a reviewer deciding whether the removal changed the meaning needs to know
+        // where they were.
+        "hidden": p.hidden.iter().map(|r| json!({
+            "codepoint": format!("U+{:04X}", r.codepoint),
+            "line": r.line,
+            "column": r.column,
+            "kind": format!("{:?}", r.kind),
+        })).collect::<Vec<_>>(),
+        "requires_distinct_confirmation": p.requires_distinct_confirmation,
+        "confirmation_phrase": p.confirmation_phrase,
+        "evidence": {
+            "supporting_runs": p.evidence.supporting_runs,
+            "verified_signals": p.evidence.verified_signals,
+            "note": p.evidence.note,
+        },
+    })))
+}
+
+#[derive(Deserialize)]
+struct Approval {
+    /// The hash the reviewer was shown. Required, not optional: an approval that does not say what
+    /// it approved cannot be checked against what is there now.
+    content_hash: String,
+    /// The phrase, for proposals that ask for a different gesture than a click.
+    typed: Option<String>,
+}
+
+async fn approve_proposal(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Approval>,
+) -> Result<impl IntoResponse, ApiError> {
+    let confirmation = match body.typed {
+        Some(typed) => wkbd_evolve::proposals::Confirmation::Distinct { typed },
+        None => wkbd_evolve::proposals::Confirmation::Standard,
+    };
+    let approved =
+        wkbd_evolve::proposals::approve(&state.store, &id, &body.content_hash, confirmation)
+            .await
+            // A stale hash and a wrong phrase are both refusals of this request rather than server
+            // faults, and the message says which.
+            .map_err(|e| ApiError::conflict(&e.to_string()))?;
+    Ok(Json(json!({ "id": approved.id, "status": approved.status.as_str() })))
+}
+
+async fn reject_proposal(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    wkbd_evolve::proposals::reject(&state.store, &id)
+        .await
+        .map_err(|e| ApiError::conflict(&e.to_string()))?;
     Ok(StatusCode::ACCEPTED)
 }
 

@@ -45,6 +45,23 @@ check_ge() {
     fi
 }
 
+# Reads one number out of the daemon's database. Opened read-only: the daemon is still running, and a
+# writable handle from a second process is how a test corrupts the thing it is measuring.
+count_rows() {
+    python3 - "$STATE" "$1" <<'SQLPY'
+import sqlite3, glob, os, sys
+for p in glob.glob(os.path.join(sys.argv[1], "*.db")):
+    try:
+        c = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+        print(c.execute(sys.argv[2]).fetchone()[0])
+        break
+    except Exception:
+        continue
+else:
+    print(-1)
+SQLPY
+}
+
 for tool in jq curl git python3; do
     command -v "$tool" > /dev/null || { echo "need $tool"; exit 1; }
 done
@@ -56,6 +73,7 @@ WORK=$(mktemp -d)
 REPO="$WORK/project"
 STATE="$WORK/state"
 cleanup() {
+    [ -n "${DAEMON2_PID:-}" ] && kill "$DAEMON2_PID" 2> /dev/null
     [ -n "${DAEMON_PID:-}" ] && kill "$DAEMON_PID" 2> /dev/null
     [ -n "${DAEMON_PID:-}" ] && wait "$DAEMON_PID" 2> /dev/null
     rm -rf "$WORK"
@@ -319,6 +337,110 @@ else:
 PY
 )"
 check_ge "run events recorded" 18 "$(jq -r "$RUN | length" "$E")"
+
+echo
+echo "--- what the run taught the system"
+# Facts are written directly: they are inferred statements with a confidence and a provenance, and
+# everything that reads them treats them as evidence rather than as instruction.
+check_ge "facts were extracted without anyone filling in a form" 1 "$(count_rows "SELECT count(*) FROM facts")"
+# Every fact records which run produced it. A fact with no provenance cannot be re-examined when it
+# turns out to be wrong, and that is the first question anyone asks about a memory that misled them.
+check "every extracted fact names the run it came from" "0" "$(count_rows "SELECT count(*) FROM facts WHERE source_run IS NULL")"
+# The vocabulary boundary between rules and memory. The extractor must not be able to write a fact
+# that claims the user said it: such a fact would outrank real rules at injection time and would be
+# immune to the retirement that applies to everything inferred.
+check "nothing extracted claims the user said it" "0" "$(count_rows "SELECT count(*) FROM facts WHERE source_trust = 'user'")"
+
+echo
+echo "--- the system cannot change its own instructions without being asked"
+PROPOSALS=$(curl -sf "http://127.0.0.1:$PORT/api/proposals")
+check "the approval queue is reachable" "true" "$([ -n "$PROPOSALS" ] && echo true || echo false)"
+# This run had no failures and no ownership violations, so there is nothing worth proposing. A queue
+# that fills after every run stops being read, and an approval gate nobody reads is not a gate.
+check "a clean run proposes nothing" "0" "$(echo "$PROPOSALS" | jq -r '.proposals | length')"
+# The list deliberately carries no bodies: a list is skim-read, and the body is the part that has to
+# be read carefully with the invisible characters already stripped.
+check "the list carries no proposal bodies" "0" "$(echo "$PROPOSALS" | jq -r '[.proposals[]|select(has("body"))] | length')"
+# Approving something that is not there is refused rather than quietly succeeding.
+GHOST=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PORT/api/proposals/does-not-exist/approve" \
+    -H 'content-type: application/json' -d '{"content_hash":"whatever"}')
+check "approving a proposal that does not exist is refused" "409" "$GHOST"
+
+echo
+echo "--- a run with something to learn from raises a proposal, and the proposal waits"
+# The rail only exists if something can actually reach the queue. A clean run proposing nothing shows
+# the queue is not noisy; it does not show the queue works. This run has a task whose assertion names
+# a test that will never pass, which is exactly the kind of thing worth writing down.
+FAIL_STATE="$WORK/fail"
+PORT2=$((PORT + 1))
+FREPO="$WORK/failing"
+mkdir -p "$FREPO/tests"
+(
+    cd "$FREPO" && git init -q . \
+        && git config user.email f@wkbd.invalid && git config user.name f
+    printf '#!/bin/sh\necho "test result: ok. done"\n' > tests/check.sh
+    chmod +x tests/check.sh
+    echo x > README.md
+    git add -A && git commit -q -m initial
+)
+cat > "$WORK/failplan.json" <<'FAILPLAN'
+{"goal":"attempt something that cannot be accepted","tasks":[
+  {"id":"impossible","title":"make a test pass that does not exist",
+   "body":"Try.\n\nWRITE src/x.rs <<<// nothing\n>>>",
+   "declared_paths":["src/x.rs"],"depends_on":[],
+   "verify":{"cmd":"sh tests/check.sh","must_pass":["unit::never_exists"],
+             "immutable_paths":["tests/**"]}}]}
+FAILPLAN
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$FAIL_STATE" --listen "127.0.0.1:$PORT2" \
+    --agent "worker=Worker=$WORKER" --worker-agent worker \
+    --fixed-plan "$WORK/failplan.json" > "$WORK/daemon2.log" 2>&1 &
+DAEMON2_PID=$!
+for _ in $(seq 1 80); do
+    curl -sf "http://127.0.0.1:$PORT2/api/health" > /dev/null 2>&1 && break
+    sleep 0.25
+done
+FRID=$(curl -sf -X POST "http://127.0.0.1:$PORT2/api/runs" -H 'content-type: application/json' \
+    -d "{\"goal\":\"attempt the impossible\",\"project_root\":\"$FREPO\"}" | jq -r '.id // empty')
+for _ in $(seq 1 60); do
+    N=$(curl -sf "http://127.0.0.1:$PORT2/api/proposals" | jq -r '.proposals | length')
+    [ "${N:-0}" -ge 1 ] && break
+    sleep 0.5
+done
+
+PQ=$(curl -sf "http://127.0.0.1:$PORT2/api/proposals")
+check_ge "a run with a failure raises a proposal" 1 "$(echo "$PQ" | jq -r '.proposals | length')"
+PID_=$(echo "$PQ" | jq -r '.proposals[0].id')
+REVIEW=$(curl -sf "http://127.0.0.1:$PORT2/api/proposals/$PID_")
+# Evidence, not an assertion from nowhere. A reviewer has to be able to see which run produced this.
+check "the proposal names the run it came from" "$FRID" \
+    "$(echo "$REVIEW" | jq -r '.evidence.supporting_runs[0]')"
+check_ge "the proposal carries checkable signals" 1 \
+    "$(echo "$REVIEW" | jq -r '.evidence.verified_signals | length')"
+check "the body is offered for review" "true" \
+    "$(echo "$REVIEW" | jq -r '(.body_for_human | length) > 0')"
+
+# The whole rail: nothing is in effect until a person agrees. Approving against a hash the reviewer
+# did not see has to be refused, or the check is decorative.
+WRONG=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PORT2/api/proposals/$PID_/approve" \
+    -H 'content-type: application/json' -d '{"content_hash":"0000000000000000"}')
+check "approving against content the reviewer did not see is refused" "409" "$WRONG"
+check "the refused proposal is still pending" "1" \
+    "$(curl -sf "http://127.0.0.1:$PORT2/api/proposals" | jq -r '.proposals | length')"
+
+HASH=$(echo "$REVIEW" | jq -r '.content_hash')
+OK_CODE=$(curl -s -o "$WORK/approved.json" -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PORT2/api/proposals/$PID_/approve" \
+    -H 'content-type: application/json' -d "{\"content_hash\":\"$HASH\"}")
+check "approving against the content that was shown succeeds" "200" "$OK_CODE"
+check "the queue is empty afterwards" "0" \
+    "$(curl -sf "http://127.0.0.1:$PORT2/api/proposals" | jq -r '.proposals | length')"
+
+kill "$DAEMON2_PID" 2>/dev/null || true
+wait "$DAEMON2_PID" 2>/dev/null || true
 
 echo
 if [ "$FAILED" -eq 0 ]; then

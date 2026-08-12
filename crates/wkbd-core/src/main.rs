@@ -14,6 +14,7 @@
 
 mod api;
 mod fs_bridge;
+mod learn;
 mod planner;
 mod run;
 mod runner;

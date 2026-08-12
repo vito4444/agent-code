@@ -94,6 +94,29 @@ pub fn from_events(events: &[Event], project_root: Option<&str>) -> Vec<NewFact>
                     }
                 }
             }
+            // A write we performed on the agent's behalf. Stronger evidence than a diff reported
+            // inside a tool call: we did this one ourselves, through the path guard, so the record is
+            // of an action rather than of a claim about an action. The extractor predates this event
+            // and did not look at it, which meant that for an agent using the protocol's file
+            // methods — the case the daemon now encourages — nothing was learned at all.
+            EventPayload::FileAccess { op, requested, resolved, allowed, .. } => {
+                if !*allowed || *op != wkbd_proto::FileOp::Write {
+                    continue;
+                }
+                let path = resolved.clone().unwrap_or_else(|| requested.clone());
+                out.push(NewFact {
+                    project_root: project_root.map(str::to_string),
+                    subject: format!("file:{path}"),
+                    predicate: "was_modified_by".into(),
+                    body: format!("{path} was written during this run"),
+                    // Higher than the diff case: that one is the agent describing a change, this one
+                    // is us having made it.
+                    confidence: 0.7,
+                    valid_at: Some(event.at_ms),
+                    source_run: run.clone(),
+                    source_trust: SourceTrust::Internal,
+                });
+            }
             EventPayload::PermissionResolved { option_id, auto, .. } => {
                 if *auto {
                     continue;
@@ -122,5 +145,72 @@ fn tool_kind_str(kind: &ToolKind) -> String {
     match kind {
         ToolKind::Unknown(s) => s.clone(),
         other => format!("{other:?}").to_lowercase(),
+    }
+}
+
+#[cfg(test)]
+mod file_access_tests {
+    use super::*;
+    use wkbd_proto::{FileOp, PendingEvent};
+
+    fn event(payload: EventPayload) -> Event {
+        let pending = PendingEvent::new("run:abc".to_string(), payload);
+        Event { seq: 1, session_id: pending.session_id, at_ms: 1_000, payload: pending.payload }
+    }
+
+    fn write(requested: &str, allowed: bool) -> Event {
+        event(EventPayload::FileAccess {
+            op: FileOp::Write,
+            requested: requested.to_string(),
+            resolved: Some(requested.to_string()),
+            allowed,
+            refusal: (!allowed).then(|| "outside-root".to_string()),
+            bytes: Some(10),
+        })
+    }
+
+    /// The seam this closes. The extractor was written before the daemon performed file I/O on an
+    /// agent's behalf, so for an agent using the protocol's file methods — the case the daemon now
+    /// encourages, because it is the only one where the access is bounded and logged — nothing was
+    /// learned from a run at all.
+    #[test]
+    fn a_write_we_performed_is_a_fact() {
+        let facts = from_events(&[write("/p/src/a.rs", true)], Some("/p"));
+        assert_eq!(facts.len(), 1, "{facts:?}");
+        assert_eq!(facts[0].subject, "file:/p/src/a.rs");
+        assert_eq!(facts[0].predicate, "was_modified_by");
+        assert_eq!(facts[0].source_trust, SourceTrust::Internal);
+    }
+
+    /// A refusal is not a modification. Learning "this file was modified" from an attempt that was
+    /// blocked would record the opposite of what happened.
+    #[test]
+    fn a_refused_write_teaches_nothing() {
+        assert!(from_events(&[write("/etc/passwd", false)], Some("/p")).is_empty());
+    }
+
+    #[test]
+    fn a_read_is_not_a_modification() {
+        let e = event(EventPayload::FileAccess {
+            op: FileOp::Read,
+            requested: "/p/src/a.rs".into(),
+            resolved: Some("/p/src/a.rs".into()),
+            allowed: true,
+            refusal: None,
+            bytes: Some(10),
+        });
+        assert!(from_events(&[e], Some("/p")).is_empty());
+    }
+
+    /// Nothing the extractor produces may claim the user said it. There is no name for that here —
+    /// `ExtractedKind` has no variant for a rule — and this asserts the property at the output as
+    /// well, because the vocabulary argument only holds while nobody adds a field by hand.
+    #[test]
+    fn nothing_extracted_is_attributed_to_the_user() {
+        let facts = from_events(&[write("/p/a", true), write("/p/b", true)], Some("/p"));
+        assert!(!facts.is_empty());
+        for f in &facts {
+            assert_ne!(f.source_trust, SourceTrust::User, "{f:?}");
+        }
     }
 }

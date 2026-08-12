@@ -70,11 +70,11 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace              # 273 tests
+cargo test --workspace              # 277 tests
 cd ui && pnpm vitest run            # 66 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 47 assertions, the conversation slice
-./scripts/e2e-orchestration.sh      # 33 assertions, one run start to finish
+./scripts/e2e-orchestration.sh      # 48 assertions, one run start to finish
 ```
 
 The two end-to-end checks are the ones to run before believing anything works. Every defect in
@@ -119,6 +119,14 @@ recorded before the run started.
 The first graph the check feeds in is deliberately invalid — one task connected to nothing in a graph
 that has edges — so the redraft path runs too. A replan loop that is never exercised is a replan loop
 that does not work.
+
+It then runs a second, deliberately failing goal, because the safety rail around self-modification is
+only real if something can reach it. A clean run proposing nothing shows the queue is not noisy; it
+does not show the queue works. So the second run raises a proposal, and the assertions are that the
+proposal names the run that produced it, that approving it against a hash the reviewer was not shown
+is refused and leaves it pending, and that approving against the hash that *was* shown succeeds.
+Removing the hash comparison turns the first two red — an approval that does not say what it approved
+would otherwise be accepted.
 
 ## 4. The decisions worth knowing
 
@@ -477,14 +485,14 @@ nothing appears outside it.
 - **A virtualized transcript.** Collapsing by default keeps the node count manageable at
   reachable lengths. Virtualization has to be designed together with end-anchored scrolling and
   the sticky prompt header.
-- **`wkbd-evolve` is not wired to the daemon.** The playbook, proposals, routing and distillation
-  are complete and tested, but nothing starts them and there is no approval queue in the interface.
-  Since the safety rail is "the system's instructions to itself take effect only after a person
-  agrees", the rail is currently intact by virtue of nothing being able to write those instructions
-  at all — which is not the same as the rail working.
-- **Memory extraction does not run after a run.** `wkbd-memory` extracts facts from an event log and
-  the rules half is wired (rules are written, and injected at every session entry point). Nothing
-  calls the extractor yet, so nothing is learned automatically.
+- **The approval queue has no interface.** The endpoints exist and are asserted end to end
+  (`/api/proposals`, review, approve, reject), but nothing in the interface renders them, so in
+  practice a proposal is raised and nobody sees it. The rail holds — nothing takes effect — but a
+  rail nobody can open is a rail that turns the feature off rather than gating it.
+- **Routing preferences are not updated from runs.** The bandit is complete and tested; nothing feeds
+  it the outcome of a real run, so the first of the three learning loops does not turn.
+- **Distillation does not run.** Repeated successful patterns are not turned into reusable workflows,
+  which is the third loop.
 - **A worker's permission requests are answered automatically.** An orchestrated worker has nobody
   watching it: waiting for a person stalls every parallel run on its first tool call, and the wait
   times out into a refusal, so "ask" and "refuse everything" are the same policy. They are allowed

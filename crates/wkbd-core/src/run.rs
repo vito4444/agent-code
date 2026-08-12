@@ -331,6 +331,9 @@ impl RunEngine {
                 wkbd_orch::RunStatus::Failed
             })
             .await?;
+            // A run where everything failed is the one with the most to learn from, so this is not
+            // conditional on success.
+            crate::learn::spawn(self.store.clone(), run_id.clone(), project_root.to_string());
             return Ok(());
         }
 
@@ -364,6 +367,14 @@ impl RunEngine {
                 )
                 .await;
                 wf.set_status(wkbd_orch::RunStatus::AwaitingMerge).await?;
+                // Learned from now rather than after the merge. The run is over as far as the work
+                // goes, and whether a person accepts the candidate says nothing about which tasks
+                // passed their acceptance checks — that is what there is to learn from.
+                crate::learn::spawn(
+                    self.store.clone(),
+                    run_id.clone(),
+                    project_root.to_string(),
+                );
             }
             SerialisableMergeOutcome::Rejected { task_id, detail, merged } => {
                 self.emit(
@@ -372,6 +383,11 @@ impl RunEngine {
                 )
                 .await;
                 wf.set_status(wkbd_orch::RunStatus::Failed).await?;
+                crate::learn::spawn(
+                    self.store.clone(),
+                    run_id.clone(),
+                    project_root.to_string(),
+                );
             }
         }
 
