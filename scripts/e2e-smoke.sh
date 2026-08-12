@@ -213,6 +213,70 @@ sleep 1
 AFTER=$(pgrep -x fake-acp-agent 2>/dev/null | wc -l | tr -d ' ')
 check "agent processes left behind by this daemon" "0" "$((AFTER - BASELINE_AGENTS))"
 
+# ---------------------------------------------------------------- degraded agent
+#
+# The profile above declares everything the protocol allows. Most agents do not: no messageId on
+# chunks, no config options, no usage reporting. That is the path most users will actually be on,
+# so it gets asserted rather than assumed — and it is asserted through a second daemon, because
+# the degraded behaviour has to hold from a cold start rather than only after a rich agent has
+# already populated the log.
+echo
+echo "checking the degraded agent path"
+STATE2=$(mktemp -d)
+PORT2=$((PORT + 1))
+SPARTAN="$ROOT/target/debug/fake-acp-agent --profile spartan"
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$STATE2" --listen "127.0.0.1:$PORT2" \
+    --agent "spartan=Spartan Agent=$SPARTAN" > "$STATE2/daemon.log" 2>&1 &
+DAEMON2_PID=$!
+
+for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$PORT2/api/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
+
+SID2=$(curl -sf -X POST "http://127.0.0.1:$PORT2/api/sessions" \
+    -H 'content-type: application/json' \
+    -d "{\"agent_id\":\"spartan\",\"project_root\":\"$STATE2\"}" 2>/dev/null | jq -r '.id // empty')
+
+if [ -n "$SID2" ]; then
+    curl -sf -X POST "http://127.0.0.1:$PORT2/api/sessions/$SID2/prompt" \
+        -H 'content-type: application/json' -d '{"text":"find the todos"}' > /dev/null 2>&1
+    for _ in $(seq 1 60); do
+        python3 "$ROOT/scripts/read-events.py" "$PORT2" 0 1.0 > "$STATE2/events.json" 2>/dev/null || echo '[]' > "$STATE2/events.json"
+        [ "$(jq -r '[.[]|select(.payload.event=="turn_ended")]|length' "$STATE2/events.json")" != "0" ] && break
+        sleep 0.2
+    done
+    E2="$STATE2/events.json"
+
+    check "degraded: turn ended" "1" "$(jq -r '[.[]|select(.payload.event=="turn_ended")]|length' "$E2")"
+    # Segmentation with no messageId at all has to come from interleaving boundaries.
+    check "degraded: thoughts split without message ids" "2" \
+        "$(jq -r '[.[]|select(.payload.event=="segment_started" and .payload.kind=="thought")]|length' "$E2")"
+    check "degraded: every boundary is marked inferred" "true" \
+        "$(jq -r '[.[]|select(.payload.event=="segment_started")]|all(.payload.segment.synthesized)' "$E2")"
+    check "degraded: still at most one live segment" "1" "$(jq -r '
+      reduce .[] as $e ({live: [], max: 0};
+        if $e.payload.event == "segment_started" then
+          (.live |= (if any(.[]; . == $e.payload.segment.raw) then . else . + [$e.payload.segment.raw] end))
+          | .max = ([.max, (.live|length)] | max)
+        elif $e.payload.event == "segment_settled" then
+          .live |= map(select(. != $e.payload.segment.raw))
+        else . end) | .max' "$E2")"
+    # The two absences that must stay absent rather than becoming zero or "unknown".
+    check "degraded: no config options were invented" "0" \
+        "$(jq -r '[.[]|select(.payload.event=="config_options_changed")]|length' "$E2")"
+    check "degraded: no usage was invented" "0" \
+        "$(jq -r '[.[]|select(.payload.event=="usage_changed")]|length' "$E2")"
+else
+    echo "FAIL could not open a session against the degraded agent"
+    FAILED=1
+fi
+
+kill "$DAEMON2_PID" 2>/dev/null || true
+wait "$DAEMON2_PID" 2>/dev/null || true
+rm -rf "$STATE2"
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "vertical slice works end to end"

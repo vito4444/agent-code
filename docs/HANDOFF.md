@@ -73,11 +73,17 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 cargo test --workspace           # 240 tests
 cd ui && pnpm vitest run         # 41 tests
 ./scripts/m0-mergetree.sh        # 15 assertions about git's own behaviour
-./scripts/e2e-smoke.sh           # 26 assertions across the whole slice
+./scripts/e2e-smoke.sh           # 32 assertions across the whole slice
 ```
 
 `e2e-smoke.sh` is the one to run before believing anything works. Every defect described in
 section 5 was found there and by nothing else.
+
+It exercises two agents, not one. The first declares everything the protocol allows; the second
+declares none of it — no `messageId`, no config options, no usage — from a separate daemon and a
+cold start. That second pass is the one most users will actually be on, so the assertions include
+that segmentation still splits correctly without message ids, that every boundary is marked as
+inferred, and that neither config options nor usage are invented.
 
 ## 4. The decisions worth knowing
 

@@ -63,7 +63,7 @@ cd ui && pnpm dev     # proxies /api, WebSocket included
 cargo test --workspace       # 240 tests
 cd ui && pnpm vitest run     # 41 tests
 ./scripts/m0-mergetree.sh    # 15 assertions about git's own behaviour
-./scripts/e2e-smoke.sh       # 26 assertions across the whole slice
+./scripts/e2e-smoke.sh       # 32 assertions across the whole slice
 ```
 
 Run `e2e-smoke.sh` before believing anything works. Every defect listed in section 5 of the
