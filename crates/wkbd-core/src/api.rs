@@ -18,7 +18,7 @@ use std::sync::Arc;
 use wkbd_agent::SessionPurpose;
 use wkbd_memory::rules::{NewRule, RuleScope};
 
-use crate::runner::{run_turn, AskUser, TurnContext};
+use crate::runner::{run_turn, AskUser, PermissionWaiter, TurnContext};
 use crate::state::AppState;
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -141,8 +141,10 @@ async fn prompt(
     let session2 = session.clone();
     let text = body.text.clone();
     tokio::spawn(async move {
+        let publisher = state2.clone();
         let ctx = TurnContext {
             store: state2.store.clone(),
+            publish: Arc::new(move |events: &[wkbd_proto::Event]| publisher.publish(events)),
             session_local_id: session2.handle.local_id.clone(),
             handle: session2.handle.clone(),
             permissions: state2.permissions.clone(),
@@ -228,7 +230,7 @@ async fn terminal_output(
     // capability is offered, there is nothing to read, and saying so is better than
     // returning an empty string that looks like a command with no output.
     let _ = (&state, &id);
-    Err(ApiError::not_implemented(
+    Err::<Json<serde_json::Value>, _>(ApiError::not_implemented(
         "this client does not offer terminal/* yet, so there is no output to read",
     ))
 }
@@ -455,24 +457,14 @@ impl PendingPrompt {
 
 #[async_trait::async_trait]
 impl AskUser for PendingPrompt {
-    async fn ask(
-        &self,
-        _session_id: &str,
-        request_id: &str,
-        _title: &str,
-        options: &[wkbd_proto::PermissionOption],
-    ) -> Option<String> {
+    async fn register(&self, request_id: &str) -> PermissionWaiter {
         let rx = self.state.register_permission_wait(request_id).await;
-        match tokio::time::timeout(std::time::Duration::from_secs(600), rx).await {
-            Ok(Ok(answer)) => answer,
-            // Timing out refuses rather than approves. An unattended workbench must not
-            // become an approving one, and the agent gets a definite answer either way
-            // rather than blocking forever.
-            _ => {
-                self.state.clear_permission_wait(request_id).await;
-                let _ = options;
-                None
-            }
-        }
+        // Ten minutes, then refuse. Long enough for someone to come back from a meeting, short
+        // enough that an abandoned prompt does not hold an agent open indefinitely.
+        PermissionWaiter::new(rx, std::time::Duration::from_secs(600))
+    }
+
+    async fn cancel(&self, request_id: &str) {
+        self.state.clear_permission_wait(request_id).await;
     }
 }

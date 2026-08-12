@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -35,19 +35,70 @@ pub struct RawFrame {
 }
 
 /// Something the agent asked us to do, or told us about.
+///
+/// `read_seq` is the position of the line in the agent's output.
+///
+/// It exists because responses and notifications reach a consumer by different routes: a
+/// response is handed straight to whoever is awaiting it, while a notification goes through the
+/// pool's channel and a dispatcher. The response therefore travels fewer hops and can overtake
+/// notifications the agent emitted *before* it. A turn that ends when the response arrives would
+/// drop the tail of its own transcript — in practice the final answer and the last tool result —
+/// and it would do so depending on scheduling, which makes it look intermittent.
+///
+/// With a read position on both, a consumer can wait until it has processed everything the agent
+/// wrote before the response, and the ordering stops being a matter of luck.
 #[derive(Debug)]
 pub enum Incoming {
-    Notification { method: String, params: Value },
+    Notification { read_seq: u64, method: String, params: Value },
     /// A request from the agent. Must be answered via `responder`, or the agent blocks.
-    Request { id: Value, method: String, params: Value, responder: oneshot::Sender<Value> },
+    Request {
+        read_seq: u64,
+        id: Value,
+        method: String,
+        params: Value,
+        responder: oneshot::Sender<Value>,
+    },
+}
+
+impl Incoming {
+    pub fn read_seq(&self) -> u64 {
+        match self {
+            Incoming::Notification { read_seq, .. } | Incoming::Request { read_seq, .. } => {
+                *read_seq
+            }
+        }
+    }
+}
+
+/// A response, with the read position of the line that carried it.
+#[derive(Debug, Clone)]
+pub struct Response {
+    pub read_seq: u64,
+    pub value: Value,
+}
+
+/// Lets a `Response` be used wherever the result value was used before, so adding the read
+/// position did not require touching every call site.
+impl std::ops::Deref for Response {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        &self.value
+    }
 }
 
 pub struct Connection {
     stdin: Arc<Mutex<ChildStdin>>,
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, RpcError>>>>>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Response, RpcError>>>>>,
     next_id: AtomicI64,
     child: Arc<Mutex<Child>>,
     raw_sink: Option<mpsc::UnboundedSender<RawFrame>>,
+    /// Read position of the last line handed to the inbound channel.
+    ///
+    /// A consumer that has just received a response uses this to know exactly how many earlier
+    /// lines it still owes itself, without guessing from the response's own position: not every
+    /// line before a response is a notification, so "the response was line N, therefore wait for
+    /// line N-1" is wrong whenever the agent had another request in flight.
+    dispatched_seq: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -81,8 +132,9 @@ impl Connection {
         let stderr = child.stderr.take().context("agent has no stderr")?;
         let stdin = child.stdin.take().context("agent has no stdin")?;
 
-        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, RpcError>>>>> =
+        let pending: Arc<Mutex<HashMap<String, oneshot::Sender<Result<Response, RpcError>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let dispatched_seq = Arc::new(AtomicU64::new(0));
 
         // stderr is drained on its own task. An agent that writes a lot of diagnostics
         // and is never read from will eventually block on a full pipe and appear to hang.
@@ -111,8 +163,12 @@ impl Connection {
             let pending = pending.clone();
             let raw_sink = raw_sink.clone();
             let stderr_tail = stderr_tail.clone();
+            let dispatched_seq = dispatched_seq.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stdout).lines();
+                // Counts every line the agent wrote, parseable or not, so a gap in the sequence
+                // is visible in the inspector rather than silently closed up.
+                let mut read_seq: u64 = 0;
                 loop {
                     let line = match lines.next_line().await {
                         Ok(Some(l)) => l,
@@ -125,6 +181,7 @@ impl Connection {
                     if line.trim().is_empty() {
                         continue;
                     }
+                    read_seq += 1;
 
                     let parsed: Option<Value> = serde_json::from_str(&line).ok();
                     if let Some(sink) = &raw_sink {
@@ -166,7 +223,10 @@ impl Connection {
                                         .to_string(),
                                 })
                             } else {
-                                Ok(msg.get("result").cloned().unwrap_or(Value::Null))
+                                Ok(Response {
+                                    read_seq,
+                                    value: msg.get("result").cloned().unwrap_or(Value::Null),
+                                })
                             };
                             let _ = tx.send(outcome);
                         } else {
@@ -182,8 +242,10 @@ impl Connection {
                     match id {
                         Some(id) => {
                             let (responder, rx) = oneshot::channel();
+                            dispatched_seq.store(read_seq, Ordering::SeqCst);
                             if incoming
                                 .send(Incoming::Request {
+                                    read_seq,
                                     id: id.clone(),
                                     method,
                                     params,
@@ -199,7 +261,11 @@ impl Connection {
                             let _ = rx;
                         }
                         None => {
-                            if incoming.send(Incoming::Notification { method, params }).is_err() {
+                            dispatched_seq.store(read_seq, Ordering::SeqCst);
+                            if incoming
+                                .send(Incoming::Notification { read_seq, method, params })
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -233,6 +299,7 @@ impl Connection {
             next_id: AtomicI64::new(1),
             child: Arc::new(Mutex::new(child)),
             raw_sink,
+            dispatched_seq,
         })
     }
 
@@ -262,7 +329,7 @@ impl Connection {
     /// There is deliberately no timeout: a prompt turn legitimately runs for many minutes,
     /// and a client-side timeout would abandon work the agent is still doing. Liveness
     /// comes from the process supervisor and from explicit cancellation instead.
-    pub async fn request(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+    pub async fn request(&self, method: &str, params: Value) -> Result<Response, RpcError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id.to_string(), tx);
@@ -291,15 +358,36 @@ impl Connection {
         .await
     }
 
+    /// Kills the agent and reaps it.
+    ///
+    /// The wait is not optional. Signalling without reaping leaves a zombie, which still holds a
+    /// process table entry and still shows up to anything looking for the agent by name — so a
+    /// check for "did we clean up" reports a leak that is real enough to matter even though the
+    /// process is no longer running.
     pub async fn kill(&self) -> Result<()> {
         let mut child = self.child.lock().await;
+        if child.id().is_none() {
+            return Ok(());
+        }
         child.start_kill()?;
-        Ok(())
+        match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e.into()),
+            Err(_) => {
+                tracing::warn!("agent did not exit within five seconds of SIGKILL");
+                Ok(())
+            }
+        }
     }
 
     pub async fn wait(&self) -> Result<std::process::ExitStatus> {
         let mut child = self.child.lock().await;
         Ok(child.wait().await?)
+    }
+
+    /// Read position of the last line dispatched inbound.
+    pub fn dispatched_seq(&self) -> u64 {
+        self.dispatched_seq.load(Ordering::SeqCst)
     }
 
     pub async fn id(&self) -> Option<u32> {

@@ -25,7 +25,10 @@ pub mod wire;
 pub use conn::{Connection, Direction, Incoming, RawFrame, RpcError};
 pub use pool::{AgentPool, AgentSpec, LaunchConfig, ProcessKey};
 pub use probe::{CapabilityReport, ConfigSupport, probe_agent};
-pub use session::{PromptOutcome, SessionFactory, SessionHandle, SessionOpenRequest};
+pub use session::{
+    Prelude, PreludeProvider, PromptOutcome, SessionFactory, SessionHandle,
+    SessionOpenRequest, SessionPurpose,
+};
 
 #[cfg(test)]
 mod tests;

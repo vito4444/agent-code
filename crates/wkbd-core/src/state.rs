@@ -9,8 +9,10 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
-use wkbd_agent::{AgentPool, AgentSpec, Direction, Incoming, LaunchConfig, ProcessKey, RawFrame,
-                 SessionFactory, SessionHandle, SessionOpenRequest, SessionPurpose};
+use wkbd_agent::{
+    AgentPool, AgentSpec, Direction, Incoming, LaunchConfig, ProcessKey, RawFrame, SessionFactory,
+    SessionHandle, SessionOpenRequest, SessionPurpose,
+};
 use wkbd_proto::Event;
 use wkbd_sec::permission::PermissionStore;
 use wkbd_store::Store;
@@ -33,7 +35,7 @@ pub struct LiveSession {
     pub title: Option<String>,
     /// Inbound messages for this session only.
     pub inbox: Arc<Mutex<mpsc::UnboundedReceiver<Incoming>>>,
-    inbox_tx: mpsc::UnboundedSender<Incoming>,
+    pub inbox_tx: mpsc::UnboundedSender<Incoming>,
     /// Set while a turn is running, so a second prompt cannot start one concurrently.
     pub busy: Arc<Mutex<bool>>,
 }
@@ -46,13 +48,13 @@ pub struct AppState {
     pub agents: Vec<AgentSpec>,
     pub sessions: RwLock<HashMap<String, Arc<LiveSession>>>,
     /// Maps the agent's own session id to our local id, for demultiplexing.
-    acp_to_local: RwLock<HashMap<String, String>>,
+    pub acp_to_local: RwLock<HashMap<String, String>>,
     pub events: broadcast::Sender<Event>,
     pub raw: Mutex<Vec<InspectorFrame>>,
     pub degraded: Option<String>,
     pub state_dir: std::path::PathBuf,
     /// Permission requests currently on screen, keyed by request id.
-    pending_permissions: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Option<String>>>>,
+    pub pending_permissions: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Option<String>>>>,
 }
 
 impl AppState {

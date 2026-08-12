@@ -268,7 +268,7 @@ pub async fn probe_agent(
                 msg = rx.recv() => {
                     let Some(msg) = msg else { break };
                     match msg {
-                        Incoming::Notification { method, params } if method == "session/update" => {
+                        Incoming::Notification { method, params, .. } if method == "session/update" => {
                             let Some(update) = params.get("update") else { continue };
                             let raw = wire::map_session_update(update, false);
                             observe(&mut report, &raw);
@@ -318,7 +318,7 @@ pub async fn probe_agent(
         // final answer and the last tool result, which is exactly what the matrix is
         // supposed to measure. See the same drain in the session runner.
         while let Ok(msg) = rx.try_recv() {
-            if let Incoming::Notification { method, params } = msg {
+            if let Incoming::Notification { method, params, .. } = msg {
                 if method == "session/update" {
                     if let Some(update) = params.get("update") {
                         let raw = wire::map_session_update(update, false);

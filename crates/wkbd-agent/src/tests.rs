@@ -169,7 +169,7 @@ async fn run_turn(
 /// events it produced.
 async fn handle_incoming(handle: &SessionHandle, msg: Incoming) -> Vec<EventPayload> {
     match msg {
-        Incoming::Notification { method, params } if method == "session/update" => {
+        Incoming::Notification { method, params, .. } if method == "session/update" => {
             match params.get("update") {
                 Some(update) => handle.ingest_update(update).await,
                 None => Vec::new(),
@@ -443,7 +443,7 @@ async fn cancelling_settles_the_open_tool_call() {
     let mut saw_tool = false;
     while !saw_tool {
         match tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await {
-            Ok(Some((_, Incoming::Notification { method, params }))) if method == "session/update" => {
+            Ok(Some((_, Incoming::Notification { method, params, .. }))) if method == "session/update" => {
                 if let Some(update) = params.get("update") {
                     if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("tool_call") {
                         saw_tool = true;
