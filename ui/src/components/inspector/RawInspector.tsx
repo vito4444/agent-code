@@ -67,7 +67,12 @@ export function RawInspector() {
       <ol className="inspector-frames">
         {shown.map((f, i) => (
           <li key={i} className="frame" data-direction={f.direction} data-malformed={f.malformed}>
-            <span className="frame-dir">{f.direction === 'to_agent' ? '\u2192' : '\u2190'}</span>
+            <span
+              className="frame-dir"
+              title={f.direction === 'to_agent' ? 'sent to the agent' : 'received from the agent'}
+            >
+              {f.direction === 'to_agent' ? '\u25b6' : '\u25c0'}
+            </span>
             <span className="frame-agent">{f.agent_id}</span>
             <span className="frame-time">{new Date(f.at_ms).toLocaleTimeString()}</span>
             {f.malformed && <span className="frame-bad">not JSON</span>}

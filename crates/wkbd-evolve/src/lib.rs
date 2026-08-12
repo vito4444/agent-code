@@ -30,3 +30,4 @@ pub mod routing;
 
 pub use playbook::{Bullet, PlaybookDelta, SourceTrust};
 pub use proposals::{Proposal, ProposalPayload, Risk};
+pub use routing::{Decision, Features, Router};

@@ -467,8 +467,11 @@ export class EventBatcher {
 
   constructor(
     private readonly commit: (events: WkbdEvent[]) => void,
-    private readonly schedule: (cb: () => void) => number = requestAnimationFrame,
-    private readonly cancel: (handle: number) => void = cancelAnimationFrame,
+    // Wrapped rather than passed by reference. `requestAnimationFrame` is a method on the window
+    // object, and handing the bare function to something that calls it unbound throws
+    // "Illegal invocation" — which surfaces as the event stream silently never publishing.
+    private readonly schedule: (cb: () => void) => number = (cb) => requestAnimationFrame(cb),
+    private readonly cancel: (handle: number) => void = (h) => cancelAnimationFrame(h),
   ) {}
 
   push(...events: WkbdEvent[]): void {

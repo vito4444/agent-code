@@ -112,6 +112,23 @@ impl AppState {
             .insert(session.handle.acp_session_id.clone(), local_id.clone());
         self.sessions.write().await.insert(local_id.clone(), session.clone());
 
+        // The options the agent declared at `session/new` have to reach the client as an event.
+        //
+        // They are the model and thinking-level selectors. Holding them only in memory means the
+        // interface sees an empty list and correctly draws nothing — so the feature looks absent
+        // rather than broken, which makes it exactly the kind of gap that survives review. The
+        // event also puts them in the log, so a reconnecting client and a replayed run see the
+        // same controls as the original.
+        if !session.handle.config_options.is_empty() {
+            let payload = wkbd_proto::EventPayload::ConfigOptionsChanged {
+                options: session.handle.config_options.clone(),
+            };
+            match self.store.append_one(local_id.clone(), payload).await {
+                Ok(event) => self.publish(&[event]),
+                Err(e) => tracing::warn!(error = %e, "could not record the agent's config options"),
+            }
+        }
+
         // Recording the session is best effort. Failing to persist the row must not stop a
         // session that is already running: the event log is the source of truth and this
         // table is a convenience index over it.

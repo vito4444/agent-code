@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EventBatcher, applyOne, contextPercent, emptySession, liveSegment } from './store';
-import type { EventPayload, SessionState, WkbdEvent } from './types';
+import type { TurnItem } from './types';
+import type { SessionState } from './store';
+import type { EventPayload, WkbdEvent } from './types';
 
 function fold(payloads: EventPayload[]): SessionState {
   return payloads.reduce(applyOne, emptySession());
@@ -23,7 +25,7 @@ describe('event folding', () => {
     ]);
 
     const turn = state.turns[0];
-    const live = turn.items.filter((i) => i.type === 'segment' && i.segment.state === 'live');
+    const live = turn.items.filter((i: TurnItem) => i.type === 'segment' && i.segment.state === 'live');
     expect(live).toHaveLength(1);
     expect(liveSegment(turn)?.id.raw).toBe('m2');
   });
@@ -50,7 +52,7 @@ describe('event folding', () => {
       { event: 'segment_started', segment: seg('m1'), kind: 'thought' },
       { event: 'segment_chunk', segment: seg('m1'), text: ' and finish' },
     ]);
-    const segments = state.turns[0].items.filter((i) => i.type === 'segment');
+    const segments = state.turns[0].items.filter((i: TurnItem) => i.type === 'segment');
     expect(segments).toHaveLength(1);
     expect(segments[0].type === 'segment' && segments[0].segment.text).toBe('start and finish');
   });
@@ -75,7 +77,7 @@ describe('event folding', () => {
         locations: [],
       },
     ]);
-    const calls = state.turns[0].items.filter((i) => i.type === 'tool_call');
+    const calls = state.turns[0].items.filter((i: TurnItem) => i.type === 'tool_call');
     expect(calls).toHaveLength(1);
     expect(calls[0].type === 'tool_call' && calls[0].call.content[0].type).toBe('diff');
   });
@@ -141,16 +143,18 @@ describe('EventBatcher', () => {
   });
 
   it('commits everything buffered in one call when the frame runs', () => {
-    let frameCb: (() => void) | null = null;
+    // Collected rather than held in a single mutable binding: with one binding the compiler
+    // cannot see that the scheduler ever ran, and narrows it to null.
+    const frames: Array<() => void> = [];
     const schedule = (cb: () => void) => {
-      frameCb = cb;
+      frames.push(cb);
       return 1;
     };
     const commit = vi.fn();
     const b = new EventBatcher(commit, schedule, vi.fn());
 
     b.push(ev(1), ev(2), ev(3));
-    frameCb?.();
+    for (const frame of frames) frame();
 
     expect(commit).toHaveBeenCalledTimes(1);
     expect(commit.mock.calls[0][0]).toHaveLength(3);

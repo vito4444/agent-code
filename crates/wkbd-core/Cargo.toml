@@ -16,6 +16,7 @@ wkbd-sec.workspace = true
 wkbd-vcs.workspace = true
 wkbd-memory.workspace = true
 wkbd-orch.workspace = true
+wkbd-evolve.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 rusqlite.workspace = true

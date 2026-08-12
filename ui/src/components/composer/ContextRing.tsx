@@ -28,7 +28,7 @@ export function ContextRing({
   if (percent === null) return null;
 
   const clamped = Math.max(0, Math.min(100, percent));
-  const radius = 7;
+  const radius = 8;
   const circumference = 2 * Math.PI * radius;
   const dash = (clamped / 100) * circumference;
 
@@ -44,18 +44,18 @@ export function ContextRing({
 
   return (
     <span className="context-ring" data-level={level} title={title} data-testid="context-ring">
-      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-        <circle className="context-track" cx="9" cy="9" r={radius} fill="none" strokeWidth="2" />
+      <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+        <circle className="context-track" cx="10" cy="10" r={radius} fill="none" strokeWidth="2.5" />
         <circle
           className="context-fill"
           cx="9"
           cy="9"
           r={radius}
           fill="none"
-          strokeWidth="2"
+          strokeWidth="2.5"
           strokeDasharray={`${dash} ${circumference - dash}`}
           strokeLinecap="round"
-          transform="rotate(-90 9 9)"
+          transform="rotate(-90 10 10)"
         />
       </svg>
       <span className="context-percent">{Math.round(clamped)}%</span>

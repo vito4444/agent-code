@@ -48,6 +48,9 @@ read_events() {
     python3 "$ROOT/scripts/read-events.py" "$PORT" 0 "${1:-1.2}"
 }
 
+# Agents already running before we start, so the leak check can measure a delta.
+BASELINE_AGENTS=$(pgrep -x fake-acp-agent 2>/dev/null | wc -l | tr -d ' ')
+
 echo "building"
 cargo build -q -p wkbd-core -p fake-acp-agent || { echo "build failed"; exit 1; }
 
@@ -169,6 +172,19 @@ check "the plan reached the transcript" "true" \
 CFG=$(curl -sf "http://127.0.0.1:$PORT/api/agents" 2>/dev/null | jq -r '.[0].id')
 check "agent listed over HTTP" "fake" "$CFG"
 
+# The model and thinking selectors come from the agent at session/new. If they never reach the
+# event log the interface sees an empty list and correctly draws nothing, so the feature looks
+# absent rather than broken — which is why this is asserted here rather than left to the eye.
+check "config options reached the event log" "true" \
+    "$(jq -r '[.[]|select(.payload.event=="config_options_changed")]|length > 0' "$EVENTS")"
+check "a model selector was offered" "model" \
+    "$(jq -r '[.[]|select(.payload.event=="config_options_changed")]|last.payload.options[]?|select(.category=="model")|.id' "$EVENTS" | head -1)"
+check "a thinking level selector was offered" "thought_level" \
+    "$(jq -r '[.[]|select(.payload.event=="config_options_changed")]|last.payload.options[]?|select(.category=="thought_level")|.id' "$EVENTS" | head -1)"
+# An option the agent declares no category for must still be carried through rather than dropped.
+check "an uncategorised option was carried through" "verbose" \
+    "$(jq -r '[.[]|select(.payload.event=="config_options_changed")]|last.payload.options[]?|select(.category==null)|.id' "$EVENTS" | head -1)"
+
 echo "checking that a second prompt is refused while one is running"
 curl -sf -X POST "http://127.0.0.1:$PORT/api/sessions/$SID/prompt" \
     -H 'content-type: application/json' -d '{"text":"again"}' > /dev/null 2>&1
@@ -184,14 +200,18 @@ else
 fi
 
 echo "checking that the agent process is gone after shutdown"
+# Measured as a delta against the processes that existed before this daemon started. A global
+# count would include agents belonging to any other daemon on the machine, which makes the
+# assertion pass or fail for reasons that have nothing to do with the code under test.
 BEFORE=$(pgrep -x fake-acp-agent 2>/dev/null | wc -l | tr -d ' ')
-check_ge "agent processes while running" 1 "$BEFORE"
+STARTED=$((BEFORE - BASELINE_AGENTS))
+check_ge "agent processes started by this daemon" 1 "$STARTED"
 kill "$DAEMON_PID" 2>/dev/null || true
 wait "$DAEMON_PID" 2>/dev/null || true
 DAEMON_PID=""
 sleep 1
 AFTER=$(pgrep -x fake-acp-agent 2>/dev/null | wc -l | tr -d ' ')
-check "agent processes after shutdown" "0" "$AFTER"
+check "agent processes left behind by this daemon" "0" "$((AFTER - BASELINE_AGENTS))"
 
 echo
 if [ "$FAILED" -eq 0 ]; then

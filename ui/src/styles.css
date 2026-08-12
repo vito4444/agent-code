@@ -163,8 +163,10 @@
  */
 .turn-prompt {
   margin: 0 0 var(--space-24);
-  padding: 0 0 0 var(--space-12);
-  border-left: 3px solid var(--chat-request-border);
+  padding: var(--space-6) var(--space-12);
+  border-left: 3px solid var(--fg-accent);
+  background: var(--chat-request-bubble-background);
+  border-radius: 0 var(--radius-medium) var(--radius-medium) 0;
   color: var(--fg-default);
   font-size: var(--chat-font-size-l);
   white-space: pre-wrap;
@@ -249,7 +251,7 @@
   padding-left: var(--space-12);
   border-left: var(--border-thin) solid var(--border-muted);
   color: var(--fg-muted);
-  font-size: var(--chat-font-size-s);
+  font-size: var(--chat-font-size-xs);
   line-height: var(--chat-line-height-relaxed);
   white-space: pre-wrap;
   /*
@@ -533,14 +535,43 @@
 /*
  * The answer is the highest-contrast text in the turn. Everything above it explains how it
  * was reached; a reader looking for the result should land here first.
+ *
+ * Four things carry the separation at once, because reviewed against a real transcript size and
+ * colour alone were not enough to read as a different kind of content: a larger size, full
+ * foreground colour against muted reasoning text, a rule above, and noticeably more space.
  */
 .answer {
   color: var(--fg-default);
-  font-size: var(--chat-font-size-l);
-  line-height: var(--chat-line-height-normal);
+  font-size: var(--chat-font-size-xl);
+  line-height: var(--chat-line-height-relaxed);
   white-space: pre-wrap;
-  padding: var(--space-8) 0 var(--space-4);
-  margin-top: var(--space-8);
+  padding: var(--space-16) 0 var(--space-8);
+  margin-top: var(--space-16);
+  border-top: var(--border-thin) solid var(--border-muted);
+}
+
+/* A caret while the answer is still arriving, so "still writing" is visible without having to
+   notice that the text stopped growing. */
+.answer[data-live='true']::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--fg-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .answer[data-live='true']::after {
+    animation: blink 1s step-end infinite;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 .echo {
@@ -793,6 +824,10 @@
   align-items: center;
   gap: var(--space-4);
   font-variant-numeric: tabular-nums;
+  padding: 0 var(--space-6);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-full);
+  height: var(--control-small-size);
 }
 
 .context-track {
@@ -1015,10 +1050,35 @@
   background: var(--bg-danger-muted);
 }
 
-.frame-dir,
 .frame-agent,
 .frame-time {
   color: var(--fg-muted);
+}
+
+/* Direction is the first thing you look for in a protocol log, so it gets a filled badge rather
+   than a bare glyph, which at this size was easy to miss entirely. */
+.frame-dir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-small);
+  /* The glyph needs its own size: inheriting the log's 11px made the arrow unreadable inside
+     the badge, which defeats the point of having a direction indicator at all. */
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--fg-on-emphasis);
+  background: var(--fg-muted);
+}
+
+.frame[data-direction='to_agent'] .frame-dir {
+  background: var(--bg-accent-emphasis);
+}
+
+.frame[data-direction='from_agent'] .frame-dir {
+  background: var(--fg-success);
 }
 
 .frame-bad {
