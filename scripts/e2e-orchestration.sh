@@ -73,6 +73,7 @@ WORK=$(mktemp -d)
 REPO="$WORK/project"
 STATE="$WORK/state"
 cleanup() {
+    [ -n "${DAEMON3_PID:-}" ] && kill "$DAEMON3_PID" 2> /dev/null
     [ -n "${DAEMON2_PID:-}" ] && kill "$DAEMON2_PID" 2> /dev/null
     [ -n "${DAEMON_PID:-}" ] && kill "$DAEMON_PID" 2> /dev/null
     [ -n "${DAEMON_PID:-}" ] && wait "$DAEMON_PID" 2> /dev/null
@@ -441,6 +442,91 @@ check "the queue is empty afterwards" "0" \
 
 kill "$DAEMON2_PID" 2>/dev/null || true
 wait "$DAEMON2_PID" 2>/dev/null || true
+
+echo
+echo "--- cancelling a run stops the work, not just the status column"
+# A button labelled "cancel" that leaves agents running reports something untrue, so this asserts
+# both halves: the run says it is cancelled, and it says what it interrupted. Three tasks with a
+# delay, so there is something in flight when the click lands.
+CANCEL_STATE="$WORK/cancel"
+PORT3=$((PORT + 2))
+CREPO="$WORK/cancelrepo"
+mkdir -p "$CREPO/src" "$CREPO/tests"
+(
+    cd "$CREPO" && git init -q . \
+        && git config user.email c@wkbd.invalid && git config user.name c
+    printf '#!/bin/sh\necho "test result: ok. done"\n' > tests/check.sh
+    chmod +x tests/check.sh
+    echo x > README.md
+    git add -A && git commit -q -m initial
+)
+cat > "$WORK/cancelplan.json" <<'CANCELPLAN'
+{"goal":"three tasks, two of them concurrent","tasks":[
+ {"id":"t1","title":"one","body":"WRITE src/1.rs <<<a\n>>>","declared_paths":["src/1.rs"],
+  "depends_on":[],"verify":{"cmd":"sh tests/check.sh","must_pass":["unit::x"],
+                            "immutable_paths":["tests/**"]}},
+ {"id":"t2","title":"two","body":"WRITE src/2.rs <<<b\n>>>","declared_paths":["src/2.rs"],
+  "depends_on":[],"verify":{"cmd":"sh tests/check.sh","must_pass":["unit::x"],
+                            "immutable_paths":["tests/**"]}},
+ {"id":"t3","title":"three","body":"WRITE src/3.rs <<<c\n>>>","declared_paths":["src/3.rs"],
+  "depends_on":["t1","t2"],"verify":{"cmd":"sh tests/check.sh","must_pass":["unit::x"],
+                                     "immutable_paths":["tests/**"]}}]}
+CANCELPLAN
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$CANCEL_STATE" --listen "127.0.0.1:$PORT3" \
+    --agent "worker=Worker=$ROOT/target/debug/fake-acp-agent --profile worker --delay-ms 4000" \
+    --worker-agent worker --fixed-plan "$WORK/cancelplan.json" > "$WORK/daemon3.log" 2>&1 &
+DAEMON3_PID=$!
+for _ in $(seq 1 80); do
+    curl -sf "http://127.0.0.1:$PORT3/api/health" > /dev/null 2>&1 && break
+    sleep 0.25
+done
+CRID=$(curl -sf -X POST "http://127.0.0.1:$PORT3/api/runs" -H 'content-type: application/json' \
+    -d "{\"goal\":\"three tasks\",\"project_root\":\"$CREPO\"}" | jq -r '.id // empty')
+
+# Cancelled only once tasks are really dispatched. Cancelling before anything started would pass
+# these assertions without exercising the interruption at all.
+for _ in $(seq 1 60); do
+    DISPATCHED=$(curl -sf "http://127.0.0.1:$PORT3/api/runs/$CRID" \
+        | jq -r '[.events[].payload.run|select(.event=="task_state_changed" and .status=="dispatched")]|length')
+    [ "${DISPATCHED:-0}" -ge 1 ] && break
+    sleep 0.3
+done
+check_ge "tasks were in flight before the cancel" 1 "${DISPATCHED:-0}"
+CANCEL_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PORT3/api/runs/$CRID/cancel")
+check "cancel is accepted" "202" "$CANCEL_CODE"
+sleep 6
+
+CE=$(curl -sf "http://127.0.0.1:$PORT3/api/runs/$CRID")
+check "the run reports itself cancelled" "cancelled" \
+    "$(echo "$CE" | jq -r '[.events[].payload.run|select(.event=="finished")]|last|.status')"
+check "the cancellation says what it interrupted" "true" \
+    "$(echo "$CE" | jq -r '[.events[].payload.run|select(.event=="finished")]|last|.detail|test("interrupted")')"
+check "the recorded status is cancelled" "cancelled" \
+    "$(curl -sf "http://127.0.0.1:$PORT3/api/runs" | jq -r --arg i "$CRID" '.runs[]|select(.id==$i)|.status')"
+# Both of the next two follow from the interruption rather than from the ordering checks, and the
+# labels say so because a mutation run proved it: neutralising every `is_cancelled` check leaves both
+# of them green. Interrupting the turns makes the tasks in flight fail, so a task depending on them is
+# blocked and the queue is empty. Worth asserting — those are the outcomes a user sees — but not
+# evidence that the pre-dispatch and wave-boundary checks work.
+#
+# Those checks are deliberately not covered. A wave is dispatched in a tight loop, so the per-task
+# check almost never wins the race, and observing the wave-boundary check needs a cancel that lands
+# after wave 1 succeeds and before wave 2 starts. A test built on winning that race would be flaky in
+# both directions, and a flaky test guarding a cancellation path is worse than an uncovered one.
+check "a task depending on interrupted work does not start" "0" \
+    "$(echo "$CE" | jq -r '[.events[].payload.run|select(.task_id=="t3" and .event=="task_workspace_ready")]|length')"
+check "no merge candidate is offered" "0" \
+    "$(echo "$CE" | jq -r '[.events[].payload.run|select(.event=="awaiting_merge")]|length')"
+# Cancelling is not destructive. A stop button that deleted work would be a destructive operation
+# wearing a harmless label.
+check "work that finished keeps its branch" "true" \
+    "$(git -C "$CREPO" branch --list 'wkbd/*' | grep -q . && echo true || echo false)"
+
+kill "$DAEMON3_PID" 2>/dev/null || true
+wait "$DAEMON3_PID" 2>/dev/null || true
 
 echo
 if [ "$FAILED" -eq 0 ]; then

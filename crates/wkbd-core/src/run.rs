@@ -65,6 +65,13 @@ pub struct RunEngine {
     /// repository shows up in the repository's own status and in globs, and then a task's
     /// `declared_paths` check starts seeing another task's files.
     pub worktree_root: PathBuf,
+    /// Runs a person asked to stop.
+    ///
+    /// In memory rather than read back from the status column on every check. The column is the
+    /// durable record — a resumed daemon must not restart a cancelled run — but a loop that
+    /// re-queried it between every task would make cancellation depend on database latency, and the
+    /// window that opens is exactly the one where another agent gets dispatched after the click.
+    pub cancelled: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 /// A run's durable state, as far as this module needs it between steps.
@@ -147,6 +154,71 @@ impl RunEngine {
         Ok(())
     }
 
+    pub fn is_cancelled(&self, run_id: &str) -> bool {
+        self.cancelled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(run_id)
+    }
+
+    /// Stops a run at the next point it can be stopped, and interrupts what is already running.
+    ///
+    /// Both halves are necessary and they do different things. Recording the cancellation stops the
+    /// next task from being dispatched; cancelling the in-flight turns stops the ones already going.
+    /// Doing only the first leaves agents working for a run the user has been told is over, which is
+    /// worse than not offering cancellation at all — the button would report something untrue.
+    ///
+    /// What it does not do is undo work. Worktrees and commits that exist stay, reachable from their
+    /// task branches. A cancel that deleted them would be a destructive operation behind a button
+    /// labelled "stop".
+    pub async fn cancel(&self, run_id: &str) -> Result<()> {
+        self.cancelled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(run_id.to_string());
+
+        let interrupted = self.interrupt_workers(run_id).await;
+
+        Workflow::resume(&self.store, run_id)
+            .set_status(wkbd_orch::RunStatus::Cancelled)
+            .await?;
+        self.emit(
+            run_id,
+            RunEvent::Finished {
+                status: RunStatus::Cancelled,
+                detail: Some(match interrupted {
+                    0 => "cancelled; nothing was running".to_string(),
+                    n => format!("cancelled; interrupted {n} agent turn(s) in flight"),
+                }),
+            },
+        )
+        .await;
+        Ok(())
+    }
+
+    /// Cancels the turn in every session belonging to this run.
+    ///
+    /// Sessions are found by where they are rooted, the same way the learning pass finds them: a
+    /// worker's project root is its worktree under `worktrees/<run id>/`, so no extra bookkeeping is
+    /// needed to know which sessions are ours.
+    async fn interrupt_workers(&self, run_id: &str) -> usize {
+        let prefix = self.worktree_root.join(run_id);
+        let mut count = 0;
+        for session in self.state.sessions_snapshot().await {
+            if !std::path::Path::new(&session.project_root).starts_with(&prefix) {
+                continue;
+            }
+            // Best effort per session. One agent that will not answer must not prevent the others
+            // from being told to stop.
+            if let Err(e) = session.handle.cancel().await {
+                tracing::warn!(error = %e, "could not cancel a worker turn");
+            } else {
+                count += 1;
+            }
+        }
+        count
+    }
+
     async fn drive(self: &Arc<Self>, wf: Workflow, goal: &str, project_root: &str) -> Result<()> {
         let run_id = wf.run_id().to_string();
         let repo = PathBuf::from(project_root);
@@ -216,10 +288,20 @@ impl RunEngine {
         let mut failed: Vec<String> = Vec::new();
 
         for wave in &validated.waves {
+            // Checked at the wave boundary and again before each dispatch. A cancellation that is
+            // only honoured between waves still starts every task in the current one, which for a
+            // wide graph is most of the run.
+            if self.is_cancelled(&run_id) {
+                return Ok(());
+            }
+
             // Everything in one wave at once. The waves come from the edges, so this is the whole
             // parallelism story: no heuristic decides what is safe to run together, the graph does.
             let mut handles = Vec::new();
             for task_id in wave {
+                if self.is_cancelled(&run_id) {
+                    break;
+                }
                 let Some(task) = by_id.get(task_id.as_str()).copied() else { continue };
 
                 // A task whose dependency failed cannot start: its starting point would be missing
@@ -310,6 +392,13 @@ impl RunEngine {
                     }
                 }
             }
+        }
+
+        if self.is_cancelled(&run_id) {
+            // No candidate is assembled for a cancelled run. Presenting one would invite a merge of
+            // a partial result the user stopped on purpose, and the tasks that did finish keep their
+            // branches either way.
+            return Ok(());
         }
 
         if queue.is_empty() {

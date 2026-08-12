@@ -286,6 +286,14 @@ export interface RunSummary {
   goal: string;
   project_root: string;
   status: RunStatus;
+  /**
+   * When the run was created, from the daemon rather than from when this client heard about it.
+   *
+   * Sorting on arrival order looks right until a reload, at which point the list is in whatever
+   * order the log replayed and two clients open on the same daemon disagree about which run is
+   * newest.
+   */
+  created_ms: number;
 }
 
 /** A message the user composed while the agent was busy. */

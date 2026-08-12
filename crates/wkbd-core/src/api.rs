@@ -35,6 +35,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/runs/{id}", get(get_run))
         .route("/api/runs/{id}/merge", post(merge_run))
         .route("/api/runs/{id}/abandon", post(abandon_run))
+        .route("/api/runs/{id}/cancel", post(cancel_run))
         .route("/api/proposals", get(list_proposals))
         .route("/api/proposals/{id}", get(review_proposal))
         .route("/api/proposals/{id}/approve", post(approve_proposal))
@@ -311,6 +312,22 @@ async fn reject_proposal(
     wkbd_evolve::proposals::reject(&state.store, &id)
         .await
         .map_err(|e| ApiError::conflict(&e.to_string()))?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// Stops a run.
+///
+/// Distinct from abandoning one. Cancelling stops work that is still happening; abandoning declines
+/// to merge a candidate that already exists. Offering only the second would leave the button that
+/// says "cancel" doing nothing to the agents currently running, which is worse than not offering it.
+async fn cancel_run(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let engine = state
+        .runs()
+        .ok_or_else(|| ApiError::not_implemented("runs are not configured"))?;
+    engine.cancel(&id).await.map_err(ApiError::internal)?;
     Ok(StatusCode::ACCEPTED)
 }
 

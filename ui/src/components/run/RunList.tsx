@@ -33,7 +33,11 @@ export function RunList({
 
   return (
     <ul className="run-list" data-testid="run-list">
-      {runs.map((run) => {
+      {[...runs]
+        // Newest first, by the daemon's clock. Runs with no known time sort last rather than first:
+        // an unknown date is not evidence of being recent.
+        .sort((a, b) => (b.createdMs ?? -1) - (a.createdMs ?? -1))
+        .map((run) => {
         const blocker = runBlocker(run);
         const tasks = Object.values(run.tasks);
         const done = tasks.filter((t) => t.status === 'completed').length;
@@ -97,6 +101,10 @@ export function StartRun({ onStarted }: { onStarted: (run: RunSummary) => void }
         goal: goal.trim(),
         project_root: projectRoot.trim(),
         status: 'planning',
+        // This client's clock, and only until the daemon's `started` event arrives with the real one.
+        // Seeding it keeps a just-started run at the top of the list instead of at the bottom, where
+        // an unknown date would put it.
+        created_ms: Date.now(),
       });
       setGoal('');
     } catch (e) {

@@ -94,6 +94,15 @@ impl AppState {
         self.agents.iter().find(|a| a.id == id)
     }
 
+    /// Every live session, copied out.
+    ///
+    /// Copied rather than handed out under the lock, because callers iterate and then await on each
+    /// one — cancelling a turn, for instance — and holding a read lock across those awaits blocks
+    /// every session that wants to open or close while it happens.
+    pub async fn sessions_snapshot(&self) -> Vec<Arc<LiveSession>> {
+        self.sessions.read().await.values().cloned().collect()
+    }
+
     pub async fn session(&self, local_id: &str) -> Option<Arc<LiveSession>> {
         self.sessions.read().await.get(local_id).cloned()
     }

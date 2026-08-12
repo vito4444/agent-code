@@ -71,10 +71,10 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 
 ```bash
 cargo test --workspace              # 277 tests
-cd ui && pnpm vitest run            # 66 tests
+cd ui && pnpm vitest run            # 69 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 47 assertions, the conversation slice
-./scripts/e2e-orchestration.sh      # 48 assertions, one run start to finish
+./scripts/e2e-orchestration.sh      # 50 assertions, one run start to finish
 ```
 
 The two end-to-end checks are the ones to run before believing anything works. Every defect in
@@ -119,6 +119,16 @@ recorded before the run started.
 The first graph the check feeds in is deliberately invalid — one task connected to nothing in a graph
 that has edges — so the redraft path runs too. A replan loop that is never exercised is a replan loop
 that does not work.
+
+There is also a cancellation pass, because a button labelled "cancel" that leaves agents running
+reports something untrue. It cancels a run only once tasks are really dispatched, and asserts that the
+run says it is cancelled *and* says what it interrupted. Two of its assertions are labelled as
+following from the interruption rather than from the ordering checks, and that is not modesty: a
+mutation run neutralising every `is_cancelled` check left both green. Those checks are deliberately
+uncovered — a wave is dispatched in a tight loop so the per-task check rarely wins the race, and
+observing the wave-boundary check needs a cancel landing after wave 1 succeeds and before wave 2
+starts. A test built on winning that race would be flaky in both directions, and a flaky test guarding
+a cancellation path is worse than an uncovered one.
 
 It then runs a second, deliberately failing goal, because the safety rail around self-modification is
 only real if something can reach it. A clean run proposing nothing shows the queue is not noisy; it

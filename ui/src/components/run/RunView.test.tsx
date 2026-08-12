@@ -309,11 +309,19 @@ describe('the run list', () => {
     await user.click(screen.getByTestId('run-start'));
 
     await waitFor(() => expect(createRun).toHaveBeenCalledWith('add a login endpoint', '/repo'));
-    expect(onStarted).toHaveBeenCalledWith({
-      id: 'r2',
-      goal: 'add a login endpoint',
-      project_root: '/repo',
-      status: 'planning',
-    });
+    // The four fields this client knows are true, pinned exactly. The timestamp is asserted to be
+    // present rather than to a value: it is this client's clock standing in until the daemon's
+    // `started` event replaces it, and pinning a wall-clock reading would be pinning the test's own
+    // execution time.
+    expect(onStarted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'r2',
+        goal: 'add a login endpoint',
+        project_root: '/repo',
+        status: 'planning',
+      }),
+    );
+    const seeded = onStarted.mock.calls[0][0] as { created_ms?: number };
+    expect(typeof seeded.created_ms).toBe('number');
   });
 });

@@ -242,6 +242,7 @@ async fn main() -> Result<()> {
             // and in its globs, and then one task's ownership check starts seeing another task's
             // files.
             worktree_root: state_dir.join("worktrees"),
+            cancelled: std::sync::Mutex::new(Default::default()),
         });
         app_state.set_runs(engine.clone());
 

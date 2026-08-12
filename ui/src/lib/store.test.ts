@@ -410,3 +410,39 @@ describe('EventBatcher', () => {
     expect(schedule).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('when a run was created', () => {
+  /**
+   * Ordering by arrival looks right until a reload, at which point the list is in whatever order the
+   * log replayed and two clients open on the same daemon disagree about which run is newest.
+   */
+  it('takes the date from the log rather than from when this client heard about it', () => {
+    const seeded = applyRunOne(emptyRun('r1'), runStarted('r1'), 5_000);
+    expect(seeded.createdMs).toBe(5_000);
+  });
+
+  /**
+   * A row this client added optimistically carries this client's clock. Two clocks in one sortable
+   * field disagree about ordering for as long as the guess survives, so it survives only until the
+   * real one lands.
+   */
+  it('replaces an optimistic guess with the log timestamp', () => {
+    const guessed = { ...emptyRun('r1'), createdMs: 999_999 };
+    expect(applyRunOne(guessed, runStarted('r1'), 5_000).createdMs).toBe(5_000);
+  });
+
+  it('is null when nothing has said, rather than defaulting to now', () => {
+    expect(emptyRun('r1').createdMs).toBeNull();
+    expect(applyRunOne(emptyRun('r1'), runStarted('r1')).createdMs).toBeNull();
+  });
+});
+
+function runStarted(id: string) {
+  return {
+    event: 'started' as const,
+    run_id: id,
+    goal: 'g',
+    project_root: '/r',
+    base_commit: 'abc1234',
+  };
+}

@@ -105,6 +105,14 @@ export interface RunState {
   excluded: string[];
   mergeRejections: { task_id: string; detail: string; merged: string[] }[];
   detail: string | null;
+  /**
+   * When the daemon created the run. Null until something says so.
+   *
+   * From the daemon rather than from when this client heard about it. Ordering by arrival looks
+   * right until a reload, after which the list is in whatever order the log replayed and two clients
+   * open on the same daemon disagree about which run is newest.
+   */
+  createdMs: number | null;
 }
 
 export function emptyRun(id: string): RunState {
@@ -123,6 +131,7 @@ export function emptyRun(id: string): RunState {
     excluded: [],
     mergeRejections: [],
     detail: null,
+    createdMs: null,
   };
 }
 
@@ -187,6 +196,7 @@ export const useStore = create<StoreShape>((set, get) => ({
           goal: summary.goal,
           project_root: summary.project_root,
           status: summary.status,
+          createdMs: summary.created_ms ?? null,
         };
         added = true;
       }
@@ -207,7 +217,7 @@ export const useStore = create<StoreShape>((set, get) => ({
 
         if (ev.payload.event === 'run') {
           const id = runIdFromStreamId(ev.session_id) ?? ev.session_id;
-          runs[id] = applyRunOne(runs[id] ?? emptyRun(id), ev.payload.run);
+          runs[id] = applyRunOne(runs[id] ?? emptyRun(id), ev.payload.run, ev.at_ms);
           continue;
         }
 
@@ -542,7 +552,16 @@ function mapSegment(
  * the run is running, and nothing else in the stream says so. Inferring it here rather than
  * in the view keeps the answer the same for a live run and a replayed one.
  */
-export function applyRunOne(state: RunState, event: RunEvent): RunState {
+/**
+ * Folds one run event.
+ *
+ * `atMs` is the event's own timestamp, used only to date the run when the list endpoint has not been
+ * consulted — a client that learned about a run from the stream would otherwise have nothing to sort
+ * it by. Passed in rather than read off the payload because the timestamp belongs to the log entry,
+ * not to the run event, and putting it in the payload would make the same run event carry two
+ * different times depending on when it was written.
+ */
+export function applyRunOne(state: RunState, event: RunEvent, atMs?: number): RunState {
   switch (event.event) {
     case 'started':
       return {
@@ -552,6 +571,10 @@ export function applyRunOne(state: RunState, event: RunEvent): RunState {
         project_root: event.project_root,
         base_commit: event.base_commit,
         status: 'planning',
+        // The log's timestamp wins over anything seeded optimistically. A row added by this client
+        // carries this client's clock, and two clocks in one sortable field would disagree about
+        // ordering for as long as the value survived — so it survives only until the real one lands.
+        createdMs: atMs ?? state.createdMs,
       };
 
     case 'planned': {
