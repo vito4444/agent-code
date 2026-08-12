@@ -70,16 +70,18 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace           # 246 tests
-cd ui && pnpm vitest run         # 41 tests
-./scripts/m0-mergetree.sh        # 15 assertions about git's own behaviour
-./scripts/e2e-smoke.sh           # 47 assertions across the whole slice
+cargo test --workspace              # 273 tests
+cd ui && pnpm vitest run            # 66 tests
+./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
+./scripts/e2e-smoke.sh              # 47 assertions, the conversation slice
+./scripts/e2e-orchestration.sh      # 33 assertions, one run start to finish
 ```
 
-`e2e-smoke.sh` is the one to run before believing anything works. Every defect described in
-section 5 was found there and by nothing else.
+The two end-to-end checks are the ones to run before believing anything works. Every defect in
+section 5 was found by them and by nothing else — including four that every unit test in the
+repository passes through without noticing.
 
-It exercises three agents, not one. The first declares everything the protocol allows; the second
+The conversation check exercises three agents, not one. The first declares everything the protocol allows; the second
 declares none of it — no `messageId`, no config options, no usage — from a separate daemon and a
 cold start. That second pass is the one most users will actually be on, so the assertions include
 that segmentation still splits correctly without message ids, that every boundary is marked as
@@ -98,6 +100,25 @@ There is also a hard-crash pass: `SIGKILL` the daemon, which skips every gracefu
 a fresh one and check that nothing survived. It exists because the boot-side sweep reads a process
 registry, and until recently nothing wrote one — a cleanup layer present in the code and absent in
 effect.
+
+The orchestration check runs one goal to a merged commit against a repository it creates. Two of its
+assertions carry most of the weight, and both are written so that the interesting failure is a
+real-world outcome rather than a mismatched string.
+
+The first is that a dependency edge transports work. The dependent task's acceptance script passes
+only when its own file *and* both dependencies' files are present in its worktree, so an edge that
+merely summarised the dependencies into a prompt fails at acceptance. Making every task start from
+the base commit instead of from its dependencies' turns that red with `the dependent task's
+acceptance passed: false` — the acceptance check finds the missing work, which is the property being
+claimed.
+
+The second is that nothing merges without a person. Making a verified run merge itself turns two
+assertions red, one of which is `the project's branch has not moved`, compared against the commit
+recorded before the run started.
+
+The first graph the check feeds in is deliberately invalid — one task connected to nothing in a graph
+that has edges — so the redraft path runs too. A replan loop that is never exercised is a replan loop
+that does not work.
 
 ## 4. The decisions worth knowing
 
@@ -377,6 +398,40 @@ survives review. Now asserted in the slice check.
 **The event batcher threw `Illegal invocation`.** `requestAnimationFrame` was passed as a bare
 default parameter, losing its binding to `window`.
 
+### Found by connecting the orchestrator
+
+Four more, and three of them needed two agent processes running at once — which is what the
+orchestrator does and what no single-session test creates.
+
+**Session ids were keyed globally.** They are assigned by the agent, and the protocol says nothing
+about them being unique beyond one conversation; in practice an agent numbers them from one per
+process, so two processes of the same agent both call their first session `session-1`. Keyed on the
+id alone, the second registration silently replaced the first and every message from both processes
+was delivered to whichever registered last. What that looked like from outside was one task's file
+write being refused for leaving a workspace it had never approached. The map is now keyed on
+`(process, session id)`.
+
+**A turn waited on its own progress.** To decide it had received everything preceding its response,
+a turn compared its own highest processed read position against the response's. On a process serving
+several sessions the lines in between belong to somebody else and never arrive, so every turn paid
+the full ten-second timeout. The connection now carries a delivery watermark, advanced *after* a
+message reaches its destination inbox — before it, and a waiter would conclude it had a message
+still in flight.
+
+**Protecting the tests looked like changing them.** `lock_paths` assigned `0o444` and `unlock_paths`
+assigned `0o644`, which permanently dropped the executable bit — from the file most likely to be
+protected, the one that runs the tests. Git records that bit, so the chmod appeared in `git diff`,
+and the ownership check then reported every task as having modified a file it never touched. Two of
+our own mechanisms fighting, with the blame landing on a third party. Both functions now adjust bits
+rather than assigning modes.
+
+**A file could not be created in a new directory.** The write was refused because the parent did not
+exist, and the protocol has no method for creating one — so an agent could not put a file anywhere
+new, and what it would do instead is the write itself, outside anything we can check. Directories
+are now created through the guard with `mkdirat` against the descriptor above, so no path is ever
+resolved and then used by name. A test confirms a symlink out of the root is still refused and that
+nothing appears outside it.
+
 ---
 
 ## 6. What is not done
@@ -422,9 +477,28 @@ default parameter, losing its binding to `window`.
 - **A virtualized transcript.** Collapsing by default keeps the node count manageable at
   reachable lengths. Virtualization has to be designed together with end-anchored scrolling and
   the sticky prompt header.
-- **The orchestrator is not wired to the daemon.** `wkbd-orch` is complete and tested against
-  real repositories, but no HTTP surface starts a run yet.
-- **`wkbd-evolve` is not wired to the daemon** either, for the same reason.
+- **`wkbd-evolve` is not wired to the daemon.** The playbook, proposals, routing and distillation
+  are complete and tested, but nothing starts them and there is no approval queue in the interface.
+  Since the safety rail is "the system's instructions to itself take effect only after a person
+  agrees", the rail is currently intact by virtue of nothing being able to write those instructions
+  at all — which is not the same as the rail working.
+- **Memory extraction does not run after a run.** `wkbd-memory` extracts facts from an event log and
+  the rules half is wired (rules are written, and injected at every session entry point). Nothing
+  calls the extractor yet, so nothing is learned automatically.
+- **A worker's permission requests are answered automatically.** An orchestrated worker has nobody
+  watching it: waiting for a person stalls every parallel run on its first tool call, and the wait
+  times out into a refusal, so "ask" and "refuse everything" are the same policy. They are allowed
+  and recorded instead. What constrains a worker is therefore the worktree, the path guard rooted at
+  it, and the acceptance check — not the prompt. Treating the prompt as a boundary for an unattended
+  session would be believing a check nobody performs.
+- **Replanning is reported but not performed.** A task that changes files it did not declare fails
+  the run and emits a `replanning` event naming the trigger. Sending that trigger back to the
+  planner for a new graph is not implemented, so the second entry point for the model exists in the
+  `Planner` trait and in the plan-rejection loop but not for ownership violations.
+- **`known_tests` is always empty.** Enumerating a repository's tests means running its build, so
+  the validator degrades to accepting any identifier rather than skipping validation. A task can
+  therefore name an assertion that does not exist, and it will fail at acceptance instead of at
+  validation — later and more expensively than it should.
 
 ## 7. Unverified claims
 
