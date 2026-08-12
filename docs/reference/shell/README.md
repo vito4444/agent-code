@@ -82,3 +82,58 @@ And the daemon did not serve the interface at all unless `--ui-dir` was passed, 
 it got 404 on every path outside `/api/*`. It now finds the built interface beside the binary or in
 `ui/dist`, and says so at startup — or says it found none, which is the line that would have made
 the white window take minutes instead of an hour.
+
+## The paper theme
+
+`paper-transcript.png`, `paper-thinking.png` and `paper-empty.png` are the interface after it was
+re-themed from reference screenshots the user supplied. The change is in `tokens.css` and nowhere
+else, which was the point of putting the colours there in the first place — the claim that a theme
+could be swapped by redefining variables is now load-bearing rather than aspirational.
+
+What changed and why, rather than what colour things are:
+
+- **A cream ground instead of white.** Pure white at full brightness is the specific thing that makes
+  a long session tiring, because the page is then the brightest object in the room and the text has to
+  compete with it. Dropping the page below the text keeps the contrast between them and removes the
+  glare, which is the opposite trade from dimming the text.
+- **A serif for running prose only** — the answer and the reasoning. A transcript is mostly read, and
+  a reading task wants what a book has. Paths, counts, rows, labels and diffs keep the sans-serif and
+  the monospace, because a serif is worse at 11px and worse in a table. The split follows what the
+  text is *for*.
+- **Warm neutrals and a coral accent.** A cream ground under blue-grey text reads as a colour
+  mistake, and a blue link on cream is the one element that looks pasted on.
+- **Diff colours desaturated well below the usual.** A full-strength green block on cream is the
+  loudest thing on the page, and a diff is reference material rather than an alert.
+- **Reasoning drawn as a timeline**: a node where the thinking started, a rule beside the text, and a
+  closing node that says it finished. A paragraph indented under a heading reads as part of the
+  answer, and this band is specifically *not* the answer. `paper-thinking.png` catches the live state,
+  where the node pulses and the label reads "Thinking".
+
+Three details in there cost more than one attempt, all of them the same mistake — trusting a glyph to
+land where it looks like it should:
+
+1. The timeline nodes were `●` characters. A glyph's position comes from the font's metrics, and this
+   one landed where a superscript goes and read as a typo in the middle of the sentence. They are CSS
+   circles now.
+2. The disclosure arrow was `▸`, which reads as a bullet, then `⌄`, which rendered below the baseline
+   in the fallback serif and read as a comma. It is a rotated border pair now.
+3. The label while thinking used the theme's "shimmer" colour, which made the only thing currently
+   happening the quietest text on screen. It uses the ordinary muted colour and keeps the pulse.
+
+`port-taken.png` is the shell refusing to adopt a daemon it did not start. The port is fixed, so a
+stale daemon holding it makes the new one fail to bind and exit — after which "something answers on
+8787" is true and points at a process this shell cannot configure or restart. Every symptom of
+adopting it is indirect: agents that were configured are missing, a flag has no effect, the interface
+is a version behind. The daemon now reports its pid on `/api/health` and the shell compares it.
+
+## Two things from the references that were not adopted
+
+**The user's message is still a quote line, not a right-aligned bubble.** Both references bubble it,
+and the earlier instruction for this project was explicit and reasoned: this is not two people
+talking, it is an instruction with an execution trace under it. Overturning that on the strength of a
+screenshot seemed like the wrong way round, and it is a one-line change if the reference wins.
+
+**The model picker is still a flat list.** The reference groups models by capability with a sentence
+about each tier. An agent declares a list of model ids over the protocol and nothing else — no tier,
+no description, no price — so grouping them would mean inventing the tiers, and a confident-looking
+grouping that came from nowhere is worse than an honest flat list.

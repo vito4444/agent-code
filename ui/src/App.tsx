@@ -5,17 +5,60 @@ import { RulesScreen } from './components/rules/RulesScreen';
 import { RawInspector } from './components/inspector/RawInspector';
 import { RunList, StartRun } from './components/run/RunList';
 import { RunView } from './components/run/RunView';
+import { SessionList } from './components/sidebar/SessionList';
 import * as api from './lib/api';
 import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
 
 type Screen = 'chat' | 'rules' | 'inspector' | 'runs';
 
+/**
+ * What the transcript says before there is one.
+ *
+ * "No session selected." was accurate and useless: it named a state without saying what to do about
+ * it, in the largest empty area in the application. The two things worth saying here are the two
+ * things this workbench does that a single chat window does not, so they are what fills the space.
+ */
+function StartHere({ hasSession, onRuns }: { hasSession: boolean; onRuns: () => void }) {
+  return (
+    <div className="start-here" data-testid="start-here">
+      <h1>Workbench</h1>
+      {hasSession ? (
+        <p>Describe what you want done. The reasoning, every tool call and every file touched will
+          appear here as it happens.</p>
+      ) : (
+        <p>Open a session from the sidebar to talk to one agent, or start a run to have a goal
+          broken into tasks and worked on in parallel.</p>
+      )}
+      <div className="start-here-cards">
+        <article>
+          <h2>One agent, one conversation</h2>
+          <p>
+            Streaming reasoning you can collapse, tool calls with the diff inside them, and every
+            file read or written on the agent's behalf — including the ones it was refused.
+          </p>
+        </article>
+        <article>
+          <h2>A goal, planned and split</h2>
+          <p>
+            One sentence becomes a task graph. Each task gets its own worktree, its own acceptance
+            check, and nothing merges until you say so.
+          </p>
+          <button type="button" onClick={onRuns} data-testid="start-here-runs">
+            Go to runs
+          </button>
+        </article>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const store = useStore();
   const [screen, setScreen] = useState<Screen>('chat');
   const [autonomy, setAutonomy] = useState<AutonomyLevel>('ask_outside_sandbox');
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [agents, setAgents] = useState<api.AgentSummary[]>([]);
   const streamRef = useRef<EventStream | null>(null);
 
   // The stream is created once. Recreating it on state change would reconnect on every
@@ -48,6 +91,39 @@ export function App() {
         // A daemon that is not up yet is normal during startup; the stream's reconnect
         // loop will bring the list in when it arrives.
       });
+  }, []);
+
+  // A session this client has not heard of.
+  //
+  // The list is fetched once at startup, which is right for the common case and wrong for every other
+  // one: the daemon serves more than one client, and the orchestrator opens sessions of its own. A
+  // session created anywhere else would otherwise stay invisible until somebody reloaded — and for
+  // the orchestrator's workers, whose transcripts are the only record of what a task actually did,
+  // that is the information least worth hiding.
+  //
+  // Keyed on the *set* of ids rather than on a count, so a session closing and another opening in the
+  // same batch still triggers a refetch.
+  const knownIds = store.sessionList.map((s) => s.id).join(',');
+  const streamedIds = Object.keys(store.sessions).sort().join(',');
+  useEffect(() => {
+    const known = new Set(knownIds.split(',').filter(Boolean));
+    const unknown = streamedIds.split(',').filter((id) => id !== '' && !known.has(id));
+    if (unknown.length === 0) return;
+    api
+      .listSessions()
+      .then((list) => {
+        useStore.getState().setSessionList(list);
+        if (useStore.getState().activeSessionId === null && list.length > 0) {
+          useStore.getState().setActiveSession(list[0].id);
+        }
+      })
+      .catch(() => {});
+  }, [knownIds, streamedIds]);
+
+  // Which agents exist at all. Fetched once: the set is fixed at daemon startup, since an agent is a
+  // command line the daemon was told about.
+  useEffect(() => {
+    api.listAgents().then(setAgents).catch(() => {});
   }, []);
 
   // Runs are folded from the event stream, so this only covers the window before the replay
@@ -105,25 +181,29 @@ export function App() {
     <div className="app">
       <nav className="sidebar">
         <div className="sidebar-brand">Workbench</div>
-        <ul className="sidebar-sessions">
-          {store.sessionList.map((s) => (
-            <li key={s.id}>
-              <button
-                type="button"
-                data-active={s.id === activeId}
-                onClick={() => {
-                  useStore.getState().setActiveSession(s.id);
-                  setScreen('chat');
-                }}
-              >
-                <span className="session-agent">{s.agent_display_name}</span>
-                <span className="session-title" title={s.project_root}>
-                  <bdi>{s.title ?? s.project_root}</bdi>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <SessionList
+          sessions={store.sessionList}
+          agents={agents}
+          activeId={activeId}
+          onSelect={(id) => {
+            useStore.getState().setActiveSession(id);
+            setScreen('chat');
+          }}
+          onNew={(agentId, root) => {
+            api
+              .createSession(agentId, root)
+              .then((created) => {
+                useStore.getState().setSessionList([...store.sessionList, created]);
+                useStore.getState().setActiveSession(created.id);
+                setScreen('chat');
+              })
+              .catch(() => {
+                // Reported by the daemon's own error, which the list will reflect on its next load.
+                // Swallowing it here rather than throwing keeps a bad directory from taking the
+                // whole interface down.
+              });
+          }}
+        />
         <div className="sidebar-footer">
           <button
             type="button"
@@ -189,11 +269,7 @@ export function App() {
           <>
             <div className="transcript" data-testid="transcript">
               {session.turns.length === 0 && (
-                <div className="empty">
-                  {activeId
-                    ? 'No turns yet. Describe what you want done.'
-                    : 'No session selected.'}
-                </div>
+                <StartHere hasSession={activeId !== null} onRuns={() => setScreen('runs')} />
               )}
               {session.turns.map((turn) => (
                 <Turn key={turn.turn} turn={turn} onAnswerPermission={answerPermission} />

@@ -241,9 +241,86 @@
   background: var(--bg-muted);
 }
 
+/* The disclosure arrow, drawn rather than set.
+   Every glyph tried for this sat wrong: the filled triangle read as a bullet, and the chevron
+   codepoint rendered below the baseline in the fallback font and looked like a comma. A border pair
+   rotated 45° is crisp at any size and does not depend on a font containing anything in particular. */
 .thought-caret {
-  width: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
   color: var(--fg-subtle);
+}
+
+.thought-caret::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  /* Collapsed points right, expanded points down, and the rotation animates so the direction change
+     is legible as the same arrow moving rather than as two different marks. */
+  transform: rotate(-45deg);
+  transform-origin: center;
+  transition: transform 120ms ease-out;
+}
+
+.thought-block[data-expanded='true'] .thought-caret::before {
+  transform: rotate(45deg);
+}
+
+/* The timeline the expanded body hangs from.
+   The rule is on this wrapper rather than on the body so that the closing row sits on the line
+   instead of after it: a line that stops short of the marker ending it reads as truncated. */
+.thought-timeline {
+  position: relative;
+  margin: var(--space-8) 0 var(--space-16) var(--space-16);
+  padding-left: var(--space-16);
+  border-left: var(--border-thin) solid var(--border-default);
+}
+
+/* A node on the line. Drawn rather than set, so its position comes from the box model instead of
+   from a font's idea of where a bullet belongs — the glyph version landed where a superscript would
+   and read as a typo inside the sentence. */
+.thought-node {
+  position: absolute;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--fg-subtle);
+  top: 0.7em;
+}
+
+/* While the agent is still thinking. A slow pulse rather than a spinner: a spinner claims something
+   is loading and will finish shortly, and a thought is neither. */
+.thought-node[data-live='true'] {
+  background: var(--fg-accent);
+  animation: thought-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes thought-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.thought-closed {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-subtle);
+}
+
+.thought-closed .thought-node.done {
+  position: absolute;
+  left: -20px;
+  top: 0.45em;
+  background: var(--fg-success);
 }
 
 .thought-done {
@@ -258,14 +335,15 @@
   padding: 0 var(--space-6);
 }
 
-/* Reasoning is the lowest contrast band: it is provenance, not the result. */
+/* Reasoning is the lowest contrast band: it is provenance, not the result.
+   Set in the prose serif, because it is running text and is read as sentences, but held a step down
+   in size and colour so that skipping it is easy and reading it is possible. */
 .thought-body {
-  margin: var(--space-4) 0 var(--space-8) var(--space-20);
-  padding-left: var(--space-12);
-  border-left: var(--border-thin) solid var(--border-muted);
+  padding: 0;
   color: var(--fg-muted);
-  font-size: var(--chat-font-size-xs);
-  line-height: var(--chat-line-height-relaxed);
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-m);
+  line-height: var(--prose-line-height);
   white-space: pre-wrap;
   /*
    * A cap plus internal scrolling rather than unbounded growth. An expanding block pushes
@@ -276,8 +354,13 @@
   overflow-y: auto;
 }
 
+/* The label while the agent is still thinking.
+   Not fainter than the finished one, which is what the shimmer colour alone produced: this is the
+   only thing currently happening on the screen, and making it the quietest text in the transcript
+   inverts the hierarchy. It gets the ordinary muted colour and a slow pulse, so it is legible and
+   still reads as unfinished. */
 .shimmer {
-  color: var(--chat-thinking-shimmer);
+  color: var(--fg-muted);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -555,12 +638,31 @@
  */
 .answer {
   color: var(--fg-default);
+  /* The one place the serif earns the most. Everything above the answer is provenance — rows,
+     paths, counts — and a reader skimming for the result should land on something that reads like a
+     paragraph rather than like another row. */
+  font-family: var(--font-serif);
   font-size: var(--chat-font-size-xl);
-  line-height: var(--chat-line-height-relaxed);
+  line-height: var(--prose-line-height);
   white-space: pre-wrap;
-  padding: var(--space-16) 0 var(--space-8);
-  margin-top: var(--space-16);
+  padding: var(--space-20) 0 var(--space-8);
+  margin-top: var(--space-20);
   border-top: var(--border-thin) solid var(--border-muted);
+}
+
+/* Inline code inside prose.
+   Coloured rather than boxed. A box around every identifier in a paragraph breaks the line into
+   fragments, while colour marks it as a different kind of word and leaves the sentence intact. The
+   faint ground is there to survive being quoted onto a lighter surface. */
+.answer code,
+.thought-body code,
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--fg-code);
+  background: var(--bg-inset);
+  border-radius: var(--radius-small);
+  padding: 0.1em 0.32em;
 }
 
 /* A caret while the answer is still arriving, so "still writing" is visible without having to
@@ -1787,4 +1889,197 @@
 .file-row.refused .file-reason {
   margin-left: auto;
   font-size: var(--chat-font-size-xs);
+}
+
+/* ── The sidebar ─────────────────────────────────────────────────────────────────────────────
+   Sessions grouped by project, with a filter and a way to open a new one. The flat list this
+   replaced left the middle of the sidebar empty and repeated the project path under every row, and
+   for orchestrated workers — all rooted under one run's worktree directory — it produced a column of
+   rows that were textually identical. */
+
+.sidebar-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-8) var(--space-8);
+}
+
+.sidebar-actions {
+  padding: var(--space-8) 0;
+}
+
+.sidebar-new {
+  width: 100%;
+  padding: var(--space-6) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  color: var(--fg-default);
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-new:hover {
+  border-color: var(--fg-accent);
+  color: var(--fg-accent);
+}
+
+.sidebar-filter {
+  width: 100%;
+  margin-bottom: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+}
+
+.new-session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+}
+
+.new-session select,
+.new-session input {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-6);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-small);
+  background: var(--bg-default);
+  color: var(--fg-default);
+}
+
+.new-session-actions {
+  display: flex;
+  gap: var(--space-6);
+}
+
+.new-session-actions button {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-small);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+}
+
+.new-session-actions button.quiet {
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.new-session-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-group {
+  margin-bottom: var(--space-12);
+}
+
+/* The project stated once for the group rather than under every row. Truncated from the left,
+   because the end of a path is the part that tells two of them apart. */
+.sidebar-group-name {
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-4);
+  font-size: var(--chat-font-size-xs);
+  font-weight: 400;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.sidebar-group-name > bdi {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+.sidebar-empty {
+  margin: 0 var(--space-4) var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+  line-height: var(--chat-line-height-normal);
+}
+
+/* ── The transcript before there is one ──────────────────────────────────────────────────────
+   Set wide and in the prose serif, because it is the one screen that is entirely reading. */
+
+.start-here {
+  /* Wider than a reading measure on purpose: the paragraph is short and the cards below want to sit
+     side by side, and a column narrow enough for comfortable prose forces them to stack. */
+  max-width: 780px;
+  margin: var(--space-40) auto;
+  padding: 0 var(--space-16);
+  font-family: var(--font-serif);
+}
+
+.start-here h1 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-xxl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.start-here > p {
+  max-width: 62ch;
+  margin: 0 0 var(--space-32);
+  font-size: var(--chat-font-size-l);
+  line-height: var(--prose-line-height);
+  color: var(--fg-muted);
+}
+
+.start-here-cards {
+  display: grid;
+  gap: var(--space-16);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.start-here-cards article {
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-large);
+  background: var(--bg-muted);
+}
+
+.start-here-cards h2 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-m);
+  font-weight: 600;
+}
+
+.start-here-cards p {
+  margin: 0;
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-muted);
+}
+
+.start-here-cards button {
+  margin-top: var(--space-12);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-accent);
+  cursor: pointer;
 }

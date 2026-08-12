@@ -19,6 +19,12 @@ import type { SegmentView } from '../../lib/types';
  * segment owns its own override, so a new turn starts fresh because its segments are new,
  * and an old block the user opened stays open. Collapsing something the reader deliberately
  * opened is the specific behaviour that makes a transcript feel like it is fighting back.
+ *
+ * The expanded body is drawn as a timeline: a marker where the thinking started, a rule running
+ * down beside the text, and a closing marker that says it finished. That is not decoration. A
+ * paragraph of reasoning indented under a heading reads as part of the answer, and the whole point
+ * of this band is that it is *not* the answer — it is how the answer was arrived at. A rule down
+ * the side says "this is an aside" in a way indentation cannot.
  */
 export function ThoughtBlock({ segment }: { segment: SegmentView }) {
   const [override, setOverride] = useState<boolean | null>(null);
@@ -40,11 +46,15 @@ export function ThoughtBlock({ segment }: { segment: SegmentView }) {
         aria-expanded={expanded}
         onClick={() => setOverride(!expanded)}
       >
-        <span className="thought-caret" aria-hidden="true">
-          {expanded ? '\u25be' : '\u25b8'}
-        </span>
+        {/* Empty: the arrow is drawn in CSS from the block's `data-expanded`. Every glyph tried for
+            it sat wrong in at least one font, and a control that lands below the baseline reads as
+            punctuation. */}
+        <span className="thought-caret" aria-hidden="true" />
         <span className={live ? 'thought-title shimmer' : 'thought-title'}>{title}</span>
-        {!live && (
+        {!live && !expanded && (
+          /* The tick belongs on the header while the block is closed, because closed is the state a
+             finished thought spends its life in and "this finished" is the only thing worth saying
+             about it from the outside. Expanded, the closing row below carries it instead. */
           <span className="thought-done" aria-label="finished">
             {'\u2713'}
           </span>
@@ -60,8 +70,20 @@ export function ThoughtBlock({ segment }: { segment: SegmentView }) {
       </button>
 
       {expanded && (
-        <div className="thought-body" data-testid={`thought-body-${segment.id.raw}`}>
-          {segment.text}
+        <div className="thought-timeline">
+          {/* The nodes are drawn in CSS rather than set as glyphs. A glyph's position depends on the
+              font's metrics, and the first version of this put a dot where a superscript would go and
+              looked like a typo in the middle of the sentence. */}
+          <span className="thought-node" data-live={live} aria-hidden="true" />
+          <div className="thought-body" data-testid={`thought-body-${segment.id.raw}`}>
+            {segment.text}
+          </div>
+          {!live && (
+            <div className="thought-closed">
+              <span className="thought-node done" aria-hidden="true" />
+              <span>Done</span>
+            </div>
+          )}
         </div>
       )}
     </div>

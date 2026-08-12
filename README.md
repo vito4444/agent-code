@@ -133,6 +133,14 @@ operation actually is. One changed byte asks again.
 
 Apache-2.0.
 
+## Look and feel
+
+The default theme is warm and paper-coloured, with a serif for the parts of a transcript that are read
+as prose — the answer and the reasoning — and the sans-serif and monospace kept for paths, counts and
+diffs. It lives entirely in `ui/src/tokens.css`; Primer's blue-grey palette is still there as
+`[data-theme='primer']`. The reasoning behind each choice, and the three details that took more than
+one attempt, are in [`docs/reference/shell/`](docs/reference/shell/) next to screenshots.
+
 ## The desktop shell
 
 ```bash

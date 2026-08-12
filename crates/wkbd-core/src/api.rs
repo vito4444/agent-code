@@ -92,6 +92,12 @@ async fn health(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "read_only": state.store.is_read_only(),
         "degraded": state.degraded,
         "agents": state.agents.len(),
+        // So a caller that started a daemon can check it is talking to the one it started. The
+        // desktop shell binds a fixed port, and a stale daemon still holding that port means the new
+        // one fails to bind and exits while the shell — which only asked whether *something* answers
+        // — adopts the stranger. Every symptom of that is a mystery: settings that do not apply,
+        // agents that are not there, a version mismatch with no version in sight.
+        "pid": std::process::id(),
     }))
 }
 

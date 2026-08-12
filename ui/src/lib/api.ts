@@ -8,7 +8,9 @@
  */
 
 import type { Rule } from '../components/rules/RulesScreen';
-import type { RunSummary, SessionSummary } from './types';
+import type { AgentSummary, RunSummary, SessionSummary } from './types';
+
+export type { AgentSummary };
 
 const base = '/api';
 
@@ -40,6 +42,10 @@ async function accepted(path: string, init?: RequestInit): Promise<void> {
     const body = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
+}
+
+export function listAgents(): Promise<AgentSummary[]> {
+  return json('/agents');
 }
 
 export function listSessions(): Promise<SessionSummary[]> {

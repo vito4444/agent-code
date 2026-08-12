@@ -19,6 +19,15 @@ Provenance and its limits are recorded in [M0-FINDINGS.md](M0-FINDINGS.md) secti
 
 ---
 
+
+> **The default theme is no longer the one measured here.** Every colour below is Primer's, and the
+> measurements were taken against it; that palette is still available as `[data-theme='primer']`. The
+> default is now a warm, paper-coloured theme with a serif for running prose, described in
+> `docs/reference/shell/README.md` with screenshots. The spacing scale, control sizes, radii and type
+> scale are unchanged and still Primer's and VS Code's, so everything in this document about *size*
+> and *rhythm* still holds. What changed is hue, and where a serif is used.
+
+
 ## 1. Tokens
 
 Defined in [`ui/src/tokens.css`](../ui/src/tokens.css).

@@ -7,9 +7,28 @@
  * spacing keeps a dense interface consistent, while a relative type scale means one
  * variable rescales all text, which a desktop application needs and a website does not.
  *
- * Colour tokens are named after VS Code's chat theme keys and given Primer values, so that
- * a future theme can be swapped in by redefining variables rather than by editing
- * components.
+ * Colour tokens are named after VS Code's chat theme keys, so that a theme can be swapped in by
+ * redefining variables rather than by editing components. That claim is now load-bearing rather than
+ * aspirational: the default theme is no longer Primer's.
+ *
+ * ## Why the default is warm and set in a serif
+ *
+ * A transcript is mostly prose. Somebody reads a paragraph of reasoning, a paragraph of answer, and
+ * skims structured rows in between — which is a reading task, not a dashboard task, and the interface
+ * a reading task wants is the one a book has: a paper-coloured ground, a serif for running text, and
+ * enough leading that a long paragraph does not become a block.
+ *
+ * Pure white at full brightness is the specific thing that makes a long session tiring, because the
+ * page is the brightest object in the room and the text has to fight it. The cream ground drops the
+ * page below the text without touching contrast between them, which is the opposite trade from
+ * dimming the text.
+ *
+ * Structured material keeps the sans-serif and the monospace. A serif is worse at 11px, worse in a
+ * table, and worse for a path — so the split follows what the text is for rather than being applied
+ * uniformly, and `--font-sans` is still the interface font everywhere that is not prose.
+ *
+ * Primer's palette is kept as `[data-theme='primer']`, because the spacing, control sizes and radii
+ * below are still Primer's and the measurements in docs/UI-SPEC.md were taken against it.
  */
 
 :root {
@@ -26,6 +45,8 @@
   --chat-line-height-tight: 1.25;
   --chat-line-height-normal: 1.5;
   --chat-line-height-relaxed: 1.625;
+  /* For serif prose only. A serif at 1.625 still reads tight, and the references sit nearer 1.8. */
+  --prose-line-height: 1.8;
 
   /* Primer base spacing. Note 2 and 6 exist: the scale is not pure multiples of four. */
   --space-2: 2px;
@@ -67,12 +88,76 @@
     Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
     'Liberation Mono', monospace;
+  /* Running prose: the answer, and the reasoning behind it.
+     CJK serifs are named first because a Latin serif paired with a CJK sans looks like two
+     typefaces having an argument, and a mixed Chinese/English paragraph is the common case here.
+     Everything after them is a fallback that is still a serif, so the character of the page
+     survives a machine with none of the good ones installed. */
+  --font-serif: 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', SimSun,
+    'Times New Roman', 'Noto Serif', 'Liberation Serif', Georgia, serif;
 
   /* The conversation column is capped rather than filling the window. Long measure hurts
      readability, and the transcript is prose plus code, not a dashboard. */
   --conversation-max-width: 950px;
 
-  /* Light theme, Primer values. */
+  /* Default theme: paper.
+     Neutrals are warm rather than blue-grey — a cream ground under blue-grey text reads as a
+     colour mistake, and the fix is the neutrals, not the ground. */
+  --fg-default: #2b2926;
+  --fg-muted: #6b6660;
+  --fg-subtle: #918b82;
+  /* Coral rather than blue. On cream a blue link is the one element that looks pasted on, and warm
+     accents keep the page one object. */
+  --fg-accent: #b8542f;
+  --fg-success: #3f6d41;
+  --fg-danger: #a8342b;
+  --fg-attention: #8a6320;
+  --fg-on-emphasis: #fdfcf9;
+  /* Inline code in prose. Not the body colour: a path or an identifier inside a sentence is a
+     different kind of thing from the sentence, and colour says so without a box around it. */
+  --fg-code: #9c3b2e;
+
+  --bg-default: #f5f3ee;
+  /* Raised surfaces go *lighter* than the page, the way paper stacks. Going darker on a cream
+     ground reads as a hole rather than as a card. */
+  --bg-muted: #faf8f4;
+  --bg-inset: #efece4;
+  --bg-subtle: #eae6dd;
+  --bg-accent-emphasis: #b8542f;
+  --bg-success-muted: #e4ecdf;
+  --bg-danger-muted: #f6e3df;
+  --bg-attention-muted: #f7edd7;
+
+  --border-default: #ddd8cd;
+  --border-muted: #ddd8cdb3;
+  --focus-outline-color: #b8542f;
+
+  /* Named after VS Code's chat.* theme keys so the mapping is obvious. */
+  --chat-request-bubble-background: #eae6dd;
+  --chat-request-border: #ddd8cd;
+  --chat-request-code-border: #ddd8cd;
+  --chat-lines-added-foreground: #3f6d41;
+  --chat-lines-removed-foreground: #a8342b;
+  --chat-edited-file-foreground: #b8542f;
+  --chat-thinking-shimmer: #918b82;
+  --chat-checkpoint-separator: #ddd8cd;
+  --chat-slash-command-background: #eae6dd;
+
+  /* Desaturated well below the usual diff colours. A full-strength green block on cream is the
+     loudest thing on the page, and a diff is reference material rather than an alert. */
+  --inline-chat-diff-inserted: #e6eee0;
+  --inline-chat-diff-removed: #f7e6e2;
+
+  --terminal-background: #2b2926;
+  --terminal-foreground: #f0ece4;
+}
+
+/*
+ * Primer's light palette, kept because the spacing and measurements in docs/UI-SPEC.md were taken
+ * against it and because a blue-grey interface is the right choice for someone who spends the day in
+ * one and wants this to match.
+ */
+:root[data-theme='primer'] {
   --fg-default: #1f2328;
   --fg-muted: #59636e;
   --fg-subtle: #818b98;
@@ -81,6 +166,7 @@
   --fg-danger: #d1242f;
   --fg-attention: #9a6700;
   --fg-on-emphasis: #ffffff;
+  --fg-code: #0550ae;
 
   --bg-default: #ffffff;
   --bg-muted: #f6f8fa;
@@ -95,7 +181,6 @@
   --border-muted: #d1d9e0b3;
   --focus-outline-color: #0969da;
 
-  /* Named after VS Code's chat.* theme keys so the mapping is obvious. */
   --chat-request-bubble-background: #f6f8fa;
   --chat-request-border: #d1d9e0;
   --chat-request-code-border: #d1d9e0;
@@ -114,6 +199,7 @@
 }
 
 :root[data-theme='dark'] {
+  --fg-code: #ff9492;
   --fg-default: #f0f6fc;
   --fg-muted: #9198a1;
   --fg-subtle: #6e7681;

@@ -313,6 +313,20 @@ export interface SessionSummary {
  * its base commit — is folded from the run's events, because a summary that duplicated them
  * would be a second source of truth able to disagree with the log about what happened.
  */
+/** An agent the daemon was configured with. */
+export interface AgentSummary {
+  id: string;
+  display_name: string;
+  /**
+   * Settings this agent can change without being restarted.
+   *
+   * Empty for most agents, and that is not a gap in the data: the protocol has no way to change a
+   * model on a running session, so a selector for one has to open a new session instead. The
+   * interface needs this to know which of the two it is doing.
+   */
+  live_config_ids: string[];
+}
+
 export interface RunSummary {
   id: string;
   goal: string;

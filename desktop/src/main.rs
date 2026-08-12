@@ -44,7 +44,12 @@ fn main() {
     }));
 
     let url = format!("http://127.0.0.1:{PORT}/");
-    let ready = wait_for_health(&url, Duration::from_secs(20));
+    let expect_pid = child
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|c| c.id());
+    let ready = wait_for_health(&url, Duration::from_secs(20), expect_pid);
 
     tauri::Builder::default()
         .setup(move |app| {
@@ -58,11 +63,11 @@ fn main() {
             // script sent during setup races the webview's own initialisation and is simply lost, with
             // no error anywhere. Declaring the URL means the webview navigates as part of creating
             // itself, which cannot race.
-            if !ready {
+            if !matches!(ready, Readiness::Ready) {
                 // A page rather than a dialog, and rather than nothing. The reader needs the log path
                 // more than an apology, and a modal they dismiss leaves them looking at a blank
                 // window with no way back to this information.
-                let page = failure_page(&log_path());
+                let page = failure_page(&log_path(), &ready);
                 let encoded: String = page
                     .bytes()
                     .map(|b| match b {
@@ -72,7 +77,11 @@ fn main() {
                         other => format!("%{other:02X}"),
                     })
                     .collect();
-                if let Ok(u) = format!("data:text/html,{encoded}").parse() {
+                // The charset has to be declared. Percent-encoding is per byte, so the UTF-8 is
+                // intact on the way in; without this the browser decodes those bytes as latin-1 and
+                // every em dash in the page arrives as three characters of noise. A diagnostic page
+                // that looks corrupted is one the reader stops trusting halfway through.
+                if let Ok(u) = format!("data:text/html;charset=utf-8,{encoded}").parse() {
                     let _ = window.navigate(u);
                 }
             }
@@ -180,64 +189,134 @@ fn log_path() -> PathBuf {
     base.join("wkbd").join("daemon.log")
 }
 
-/// Polls the health endpoint until it answers.
+/// Polls the health endpoint until the daemon we started answers.
 ///
 /// Polling rather than waiting on a signal from the child, because the useful question is not "did
 /// the process start" but "is it serving". A daemon that started and then failed a migration is a
 /// running process that will never answer, and a shell that trusted the spawn would show an empty
 /// window instead of the log path.
-fn wait_for_health(base: &str, timeout: Duration) -> bool {
+///
+/// The pid check is the other half, and it is not hypothetical: the port here is fixed, so a stale
+/// daemon still holding it makes the new one fail to bind and exit — after which "something answers
+/// on 8787" is true and points at a process this shell does not control and cannot restart. The
+/// symptoms are all indirect: agents that were configured are missing, a flag has no effect, the
+/// interface is a version behind. Refusing to adopt a stranger turns all of that into one sentence.
+fn wait_for_health(base: &str, timeout: Duration, expect_pid: Option<u32>) -> Readiness {
     let url = format!("{base}api/health");
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if http_ok(&url) {
-            return true;
+        match health(&url) {
+            Some(pid) => match (expect_pid, pid) {
+                // Older daemons do not report a pid. Accepting that is deliberate: refusing would
+                // make the shell unusable against a daemon that is merely old, which is a worse
+                // failure than the one being prevented.
+                (Some(want), Some(got)) if want != got => {
+                    eprintln!(
+                        "a daemon we did not start is already serving 127.0.0.1:{PORT} \
+                         (pid {got}, expected {want}); refusing to use it"
+                    );
+                    return Readiness::PortTaken { pid: got };
+                }
+                _ => return Readiness::Ready,
+            },
+            None => std::thread::sleep(Duration::from_millis(150)),
         }
-        std::thread::sleep(Duration::from_millis(150));
     }
-    false
+    Readiness::NoAnswer
+}
+
+/// Why the shell is or is not going to show the interface.
+///
+/// Three outcomes rather than a boolean, because the two failures have different remedies and a
+/// diagnostic that names the wrong cause sends the reader to the wrong place. "It did not start" means
+/// read the log; "somebody else is on the port" means close the other window.
+enum Readiness {
+    Ready,
+    NoAnswer,
+    PortTaken { pid: u32 },
+}
+
+/// `Some(pid)` when the daemon answered, where the inner option is its reported pid.
+///
+/// Two levels of option because "did not answer" and "answered without saying which process it is"
+/// are different answers and lead to different behaviour.
+fn health(url: &str) -> Option<Option<u32>> {
+    let body = http_get(url)?;
+    // A three-field JSON object read with `find`, to keep a JSON parser out of a shell that makes one
+    // request. Anything more structured than this belongs in the daemon.
+    let pid = body.split("\"pid\"").nth(1).and_then(|rest| {
+        let digits: String = rest
+            .trim_start_matches([':', ' '])
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        digits.parse().ok()
+    });
+    Some(pid)
 }
 
 /// The smallest HTTP GET that answers the question.
 ///
 /// Hand-rolled to keep an HTTP client out of the shell's dependency tree for one request against
-/// loopback. It reads only enough to see the status line.
-fn http_ok(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("http://") else { return false };
+/// loopback.
+fn http_get(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("http://")?;
     let (authority, path) = match rest.split_once('/') {
         Some((a, p)) => (a, format!("/{p}")),
         None => (rest, "/".to_string()),
     };
-    let Ok(mut stream) = std::net::TcpStream::connect(authority) else { return false };
+    let mut stream = std::net::TcpStream::connect(authority).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
     use std::io::Write;
-    if stream
+    stream
         .write_all(
             format!("GET {path} HTTP/1.0\r\nHost: {authority}\r\nConnection: close\r\n\r\n")
                 .as_bytes(),
         )
-        .is_err()
-    {
-        return false;
+        .ok()?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok()?;
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let (head, body) = text.split_once("\r\n\r\n")?;
+    if !head.starts_with("HTTP/1.") || !head.lines().next()?.contains("200") {
+        return None;
     }
-    let mut buf = [0u8; 64];
-    match stream.read(&mut buf) {
-        Ok(n) if n > 12 => buf[..n].starts_with(b"HTTP/1.") && buf[..n].windows(3).any(|w| w == b"200"),
-        _ => false,
-    }
+    Some(body.to_string())
 }
 
-fn failure_page(log: &PathBuf) -> String {
-    format!(
-        "<div style=\"font:14px/1.6 system-ui,sans-serif;padding:32px;max-width:60ch\">\
-         <h1 style=\"font-size:20px\">The workbench could not start its core process.</h1>\
-         <p>The window is open so that you can read this. Nothing has been lost: the event log is \
-         append-only and the previous session is still on disk.</p>\
-         <p>The daemon's output is at:</p>\
-         <pre style=\"background:#f6f8fa;padding:12px;border-radius:6px;overflow:auto\">{}</pre>\
-         <p>Starting <code>wkbd-core --listen 127.0.0.1:{}</code> from a terminal will show the same \
-         failure with the output attached.</p></div>",
-        log.display(),
-        PORT
-    )
+fn failure_page(log: &PathBuf, why: &Readiness) -> String {
+    // The cream ground and the serif are the interface's, hand-written here because this page loads
+    // before — or instead of — the stylesheet. A failure page that does not look like the application
+    // reads as a crash in something else.
+    let frame = "font:15px/1.7 'Source Han Serif SC','Noto Serif',Georgia,serif;\
+                 background:#f5f3ee;color:#2b2926;margin:0;padding:48px;max-width:66ch";
+    let code = "font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#9c3b2e";
+    let pre = "background:#efece4;padding:12px 14px;border-radius:6px;overflow:auto;font-size:13px";
+
+    let body = match why {
+        Readiness::PortTaken { pid } => format!(
+            "<h1 style=\"font-size:22px;margin:0 0 16px\">Another workbench is already using this \
+             port.</h1>\
+             <p>Process <span style=\"{code}\">{pid}</span> is serving \
+             <span style=\"{code}\">127.0.0.1:{PORT}</span>, and this window did not start it. It \
+             is not being used, because a daemon this shell does not control is one it cannot \
+             configure or restart — and every symptom of adopting it would be indirect: agents that \
+             are missing, flags with no effect, an interface a version behind.</p>\
+             <p>Either use the window that already has it, or stop that process and reopen this \
+             one.</p>"
+        ),
+        _ => format!(
+            "<h1 style=\"font-size:22px;margin:0 0 16px\">The workbench could not start its core \
+             process.</h1>\
+             <p>The window is open so that you can read this. Nothing has been lost: the event log \
+             is append-only and the previous session is still on disk.</p>\
+             <p>The daemon's output is at:</p>\
+             <pre style=\"{pre}\">{log}</pre>\
+             <p>Running <span style=\"{code}\">wkbd-core --listen 127.0.0.1:{PORT}</span> in a \
+             terminal shows the same failure with its output attached.</p>",
+            log = log.display()
+        ),
+    };
+
+    format!("<div style=\"{frame}\">{body}</div>")
 }
