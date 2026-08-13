@@ -48,7 +48,11 @@ pub struct LiveSession {
     pub offer_client_fs: bool,
     pub agent_id: String,
     pub agent_display_name: String,
+    /// Where the agent works.
     pub project_root: String,
+    /// The project this session's standing context belongs to. Differs from `project_root` for an
+    /// orchestrated worker, and anything asking "which project is this" wants this one.
+    pub memory_scope: String,
     pub title: Option<String>,
     /// Inbound messages for this session only.
     pub inbox: Arc<Mutex<mpsc::UnboundedReceiver<Incoming>>>,
@@ -185,6 +189,7 @@ impl AppState {
         let session = Arc::new(LiveSession {
             guard,
             offer_client_fs: self.offer_client_fs,
+            memory_scope: memory_scope.to_string(),
             agent_id: spec.id.clone(),
             agent_display_name: spec.display_name.clone(),
             project_root: project_root.to_string(),

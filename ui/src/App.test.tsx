@@ -8,6 +8,7 @@ function session(id: string, projectRoot: string): SessionSummary {
     agent_id: 'w',
     agent_display_name: 'Worker',
     project_root: projectRoot,
+    memory_scope: '/repo',
     title: null,
     prompt_capabilities: { image: false, audio: false, embedded_context: false },
   };

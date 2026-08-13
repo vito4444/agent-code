@@ -250,32 +250,51 @@ start_shell \
 
 shot paper-empty
 
-# ---------------------------------------------------------------- a conversation
+# ---------------------------------------------------------------- one conversation, three captures
 #
-# The permission is answered, because the interesting capture is a finished turn. The unanswered case
+# All three from one session, which is the point rather than an economy. The earlier version opened
+# a second session for the attachment capture and selected it by clicking the last sidebar row —
+# and both rows read "Rich Agent", so the moment the list ordered them the other way the capture
+# was of the wrong conversation and nothing said so. One session cannot be ambiguous.
+#
+# Permissions are answered because the interesting captures are finished turns. The unanswered case
 # has its own assertions in the slice check.
 S1=$(api /api/sessions -X POST -H 'content-type: application/json' \
     -d "{\"agent_id\":\"rich\",\"project_root\":\"$ROOT\"}" | jq -r .id)
-api /api/sessions/"$S1"/prompt -X POST -H 'content-type: application/json' \
-    -d '{"text":"refactor the loader and run the tests"}' > /dev/null
-sleep 4
-REQ=$(python3 "$ROOT/scripts/read-events.py" "$PORT" 0 1.5 2> /dev/null \
-    | jq -r '[.[]|select(.payload.event=="permission_requested")]|last|.payload.request_id // "1"')
-api /api/sessions/"$S1"/permission -X POST -H 'content-type: application/json' \
-    -d "{\"request_id\":\"$REQ\",\"option_id\":\"allow-once\"}" > /dev/null
-sleep 6
-raise
-shot paper-transcript
 
-# ---------------------------------------------------------------- attaching a file
+# Answers the permission this session's turn is waiting on, whichever turn that is.
+answer_permission() {
+    sleep 4
+    local req
+    req=$(python3 "$ROOT/scripts/read-events.py" "$PORT" 0 1.5 2> /dev/null \
+        | jq -r --arg s "$S1" \
+          '[.[]|select(.session_id==$s and .payload.event=="permission_requested")]|last|.payload.request_id // "1"')
+    api /api/sessions/"$S1"/permission -X POST -H 'content-type: application/json' \
+        -d "{\"request_id\":\"$req\",\"option_id\":\"allow-once\"}" > /dev/null
+    sleep 6
+}
+
+# First turn: the one with attachments, so its prompt is at the top of the record where the strip
+# can be photographed. A file and a directory, so the strip has to show both outcomes — one the
+# agent was handed, one it was only pointed at.
+api /api/sessions/"$S1"/prompt -X POST -H 'content-type: application/json' \
+    -d '{"text":"where is the one-live-segment invariant enforced?",
+         "mentions":["crates/wkbd-proto/src/normalize.rs","crates/wkbd-sec"]}' > /dev/null
+answer_permission
+raise
+# Scrolled back to the prompt, which a finished turn has pushed off the top. That also puts the way
+# back on screen, which is the other half of following a conversation and only exists in this state.
+DISPLAY="$DISPLAY_NUM" xdotool mousemove "$((WX + 600))" "$((WY + 300))"
+DISPLAY="$DISPLAY_NUM" xdotool click --repeat 25 --delay 30 4
+sleep 1.5
+shot paper-attachment
+
+# The picker, typed into the same box. A live control, so the only way to know it renders where
+# the caret is, is to put a caret there.
 #
-# Two captures, because the two halves fail differently. The picker is a live control and the only
-# way to know it renders where the caret is, is to type into it; the strip is what the transcript
-# keeps afterwards, and it is the part that says whether the agent got the file or only its name.
-#
-# The composer is the bottom of the window. Measuring it the way the row finder measures lists would
-# mean finding the box's own border among the footer's, so this clicks a point relative to the
-# window's bottom edge instead — the composer is anchored there and nothing below it moves.
+# The composer is anchored to the bottom of the window, so it is clicked relative to that edge
+# rather than found: measuring it the way the row finder measures lists would mean picking the
+# box's own border out of the footer's.
 WH=$(DISPLAY="$DISPLAY_NUM" xwininfo -id "$WID" | awk '/Height:/ {print $2}')
 WW=$(DISPLAY="$DISPLAY_NUM" xwininfo -id "$WID" | awk '/Width:/ {print $2}')
 click $((WW / 2)) $((WH - 120)) 1
@@ -283,37 +302,16 @@ DISPLAY="$DISPLAY_NUM" xdotool type --delay 60 'compare @norm'
 sleep 2
 raise
 shot mention-picker
-
-# Clear the box, then send the real one into a session of its own.
-#
-# Its own session because the strip belongs to the prompt that attached the files, and in a
-# transcript that already scrolls, the prompt is off the top by the time the answer arrives. One
-# turn fits, which is what makes the capture show the thing it is a capture of.
 DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers ctrl+a
 DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers BackSpace
-S1B=$(api /api/sessions -X POST -H 'content-type: application/json' \
-    -d "{\"agent_id\":\"rich\",\"project_root\":\"$ROOT\"}" | jq -r .id)
-# A file and a directory, so the strip has to show both outcomes: one the agent was handed and
-# one it was only pointed at.
-api /api/sessions/"$S1B"/prompt -X POST -H 'content-type: application/json' \
-    -d '{"text":"where is the one-live-segment invariant enforced?",
-         "mentions":["crates/wkbd-proto/src/normalize.rs","crates/wkbd-sec"]}' > /dev/null
-sleep 4
-REQ=$(python3 "$ROOT/scripts/read-events.py" "$PORT" 0 1.5 2> /dev/null \
-    | jq -r --arg s "$S1B" \
-      '[.[]|select(.session_id==$s and .payload.event=="permission_requested")]|last|.payload.request_id // "1"')
-api /api/sessions/"$S1B"/permission -X POST -H 'content-type: application/json' \
-    -d "{\"request_id\":\"$REQ\",\"option_id\":\"allow-once\"}" > /dev/null
-sleep 6
+
+# A second turn, so the finished-conversation capture shows the record following its newest
+# content rather than sitting where the last screenshot left it.
+api /api/sessions/"$S1"/prompt -X POST -H 'content-type: application/json' \
+    -d '{"text":"refactor the loader and run the tests"}' > /dev/null
+answer_permission
 raise
-click 100 "$(last_session_y)" 2
-# Scrolled back to the prompt, which is where the attachments are and which a finished turn has
-# pushed off the top. It also puts the way back on screen, which is the other half of following
-# a conversation and is only ever visible in this state.
-DISPLAY="$DISPLAY_NUM" xdotool mousemove "$((WX + 600))" "$((WY + 300))"
-DISPLAY="$DISPLAY_NUM" xdotool click --repeat 25 --delay 30 4
-sleep 1.5
-shot paper-attachment
+shot paper-transcript
 
 # ---------------------------------------------------------------- the file boundary
 S2=$(api /api/sessions -X POST -H 'content-type: application/json' \
@@ -425,7 +423,13 @@ for line in out.splitlines()[1:]:
     if not m:
         continue
     x, y, r, g, b = (int(v) for v in m.groups())
-    # The accent colour, which on this screen only the links and the merge button use.
+    # The main column only. The sidebar marks its selected row with a left border in the same
+    # accent colour, and once the sidebar grew run groupings that border started landing on the
+    # same row as a task card's links — where it became the leftmost cluster, so the click went
+    # into the sidebar and two captures came out byte-identical.
+    if x < 230:
+        continue
+    # The accent colour, which in this column only the links and the merge button use.
     if 150 < r < 210 and 60 < g < 110 and 30 < b < 80:
         rows.setdefault(y, []).append(x)
 
@@ -530,6 +534,60 @@ PROP_ROW=$(first_row_y)
 [ "${PROP_ROW:-0}" -gt 0 ] || { echo "could not find the proposal row"; exit 1; }
 click 700 "$PROP_ROW" 3
 shot proposal-review
+
+# ---------------------------------------------------------------- a distilled procedure
+#
+# Its own daemon and three runs, because the gate is three separate occasions: sibling tasks inside
+# one run are one planner getting one decision right, and counting them as three would let a single
+# run promote a coincidence into a procedure. Nothing here is merged in between — learning happens
+# when a run reaches its candidate, and whether a person accepts it says nothing about which
+# acceptance checks passed.
+kill "$SHELL_PID" 2> /dev/null
+wait "$SHELL_PID" 2> /dev/null
+pkill -x wkbd-core 2> /dev/null
+sleep 3
+rm -rf "$HOME/.local/state/wkbd"
+
+DISTREPO="$WORK/distrepo"
+mkdir -p "$DISTREPO/src" "$DISTREPO/tests"
+cat > "$DISTREPO/tests/check.sh" <<'CHECK'
+#!/bin/sh
+[ -f src/mod.rs ] && [ -f NOTES.md ] && echo "test unit::x ... ok"
+echo "test result: ok. done"
+CHECK
+(
+    cd "$DISTREPO" && git init -q . && git config user.email t@e && git config user.name t
+    git add -A && git commit -q -m initial
+) > /dev/null 2>&1
+python3 - "$WORK/distplan.json" <<'DISTPLAN'
+import json, sys
+plan = {"goal": "add a helper and note it", "tasks": [{
+    "id": "helper", "title": "add the helper and note it",
+    "body": "WRITE src/mod.rs <<<pub fn f() {}\n>>>\nWRITE NOTES.md <<<added f\n>>>",
+    "declared_paths": ["src/mod.rs", "NOTES.md"], "depends_on": [],
+    "verify": {"cmd": "sh tests/check.sh", "must_pass": ["unit::x"],
+               "immutable_paths": ["tests/**"]}}]}
+open(sys.argv[1], "w").write(json.dumps([plan] * 3))
+DISTPLAN
+
+start_shell \
+    --agent "worker=Worker=$AG --profile worker" \
+    --worker-agent worker --fixed-plan "$WORK/distplan.json"
+for n in 1 2 3; do
+    api /api/runs -X POST -H 'content-type: application/json' \
+        -d "{\"goal\":\"add a helper ($n)\",\"project_root\":\"$DISTREPO\"}" > /dev/null
+    sleep 7
+done
+raise
+click 30 "$PROPOSALS_Y"
+sleep 2
+DIST_ROW=$(first_row_y)
+if [ "${DIST_ROW:-0}" -gt 0 ]; then
+    click 700 "$DIST_ROW" 3
+    shot distilled-workflow
+else
+    echo "  (no distilled proposal found; skipping distilled-workflow.png)"
+fi
 
 # ---------------------------------------------------------------- mid-thought
 #

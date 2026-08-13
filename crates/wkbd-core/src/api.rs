@@ -130,6 +130,11 @@ struct SessionSummary {
     agent_id: String,
     agent_display_name: String,
     project_root: String,
+    /// The project a rule written "for this project" should attach to.
+    ///
+    /// A worker's `project_root` is a worktree that will be deleted when the run ends, so
+    /// offering it as a rule's scope offers to write a rule nothing will ever read again.
+    memory_scope: String,
     title: Option<String>,
     /// What this agent said it can be handed in a prompt. Per session rather than per agent
     /// because it is negotiated at `initialize`, and the same binary launched with a different
@@ -144,6 +149,7 @@ impl SessionSummary {
             agent_id: s.agent_id.clone(),
             agent_display_name: s.agent_display_name.clone(),
             project_root: s.project_root.clone(),
+            memory_scope: s.memory_scope.clone(),
             title: s.title.clone(),
             prompt_capabilities: s.handle.prompt_capabilities(),
         }

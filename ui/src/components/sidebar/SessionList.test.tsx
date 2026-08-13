@@ -10,6 +10,7 @@ function session(over: Partial<SessionSummary>): SessionSummary {
     agent_id: 'a',
     agent_display_name: 'Rich Agent',
     project_root: '/workspace',
+    memory_scope: '/repo',
     title: null,
     prompt_capabilities: { image: false, audio: false, embedded_context: false },
     ...over,

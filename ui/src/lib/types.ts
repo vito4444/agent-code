@@ -366,7 +366,14 @@ export interface SessionSummary {
   id: string;
   agent_id: string;
   agent_display_name: string;
+  /** Where the agent works. For an orchestrated worker, a worktree that will be deleted. */
   project_root: string;
+  /**
+   * The project this session belongs to, which is what "this project" means anywhere a user
+   * decides something durable. Offering a worker's worktree instead offers to write a rule
+   * against a directory that will not exist after the run.
+   */
+  memory_scope: string;
   title: string | null;
   prompt_capabilities: PromptCapabilities;
 }

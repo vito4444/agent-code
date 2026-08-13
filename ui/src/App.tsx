@@ -25,6 +25,18 @@ type Screen = 'chat' | 'rules' | 'inspector' | 'runs' | 'proposals' | 'settings'
  * be recorded to make the link. Called with no task to ask the weaker question — "is any of this
  * run's work still open?" — which is what decides whether to offer the link at all.
  */
+/**
+ * The directory a rule written "for this project" should attach to.
+ *
+ * The session's memory scope, never its working directory. A worker's working directory is a git
+ * worktree the run created and will delete, so scoping a rule there saves something the screen
+ * shows as enabled and nothing ever reads again — worse than not offering it, which is the same
+ * argument the rules screen makes for keeping rules and inferred memories apart.
+ */
+export function ruleScopeFor(session: api.SessionSummary | undefined): string | null {
+  return session?.memory_scope ?? null;
+}
+
 export function workerSessionFor(
   sessions: api.SessionSummary[],
   runId: string,
@@ -256,7 +268,7 @@ export function App() {
 
         {screen === 'proposals' && <ProposalQueue />}
         {screen === 'settings' && <Settings agents={agents} />}
-        {screen === 'rules' && <RulesScreen projectRoot={summary?.project_root ?? null} />}
+        {screen === 'rules' && <RulesScreen projectRoot={ruleScopeFor(summary)} />}
         {screen === 'inspector' && <RawInspector />}
 
         {screen === 'runs' && (
