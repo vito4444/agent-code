@@ -185,17 +185,21 @@ async fn propose_from_outcome(store: &Store, run_id: &str, project_root: &str) -
         return Ok(());
     }
 
+    // Sentences, without a leading marker. The marker belongs to whoever renders the line, and
+    // there are two of them: the approval queue puts each change in a list item, and the playbook
+    // prefixes every bullet on its way into a prelude. A body that carried its own dash produced
+    // "- - Task ..." in the text an agent reads and a bullet beside a dash in the queue.
     let mut lines = Vec::new();
     if replans > 0 {
         lines.push(format!(
-            "- When a task changes files outside its declared paths ({replans} did in this run), \
+            "When a task changes files outside its declared paths ({replans} did in this run), \
              declare the paths more broadly rather than splitting the task."
         ));
     }
     for (task, missing) in &failures {
         if !missing.is_empty() {
             lines.push(format!(
-                "- Task {task:?} did not make {} start passing. Check whether the assertion names a \
+                "Task {task:?} did not make {} start passing. Check whether the assertion names a \
                  test that exists before planning around it.",
                 missing.join(", ")
             ));

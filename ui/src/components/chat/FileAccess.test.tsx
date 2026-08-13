@@ -138,9 +138,71 @@ describe('a permission that expired', () => {
     );
   });
 
-  /** An answer that did land still shows the answer, expired or not. */
-  it('shows the decision when one was made', () => {
+  /**
+   * An answer that did land still shows the answer, expired or not — and shows it as a decision
+   * rather than as the label of a button. Reusing the option's own name left a card reading
+   * "Allow once" under a title, which looks like a control that does nothing when pressed.
+   */
+  it('reports the decision in the past tense, not as a button label', () => {
     render(<Turn turn={turn([permission({ resolved_with: 'allow-once' })])} />);
-    expect(screen.getByTestId('permission-p1').textContent ?? '').toContain('Allow once');
+    const text = screen.getByTestId('permission-p1').textContent ?? '';
+    expect(text).toContain('Allowed');
+    expect(screen.queryByRole('button', { name: 'Allow once' })).toBeNull();
+  });
+});
+
+/**
+ * Paths in this column are shortened against the workspace, and only against the workspace.
+ *
+ * The pairing is what makes it worth doing: attachments were already shown project-relative while
+ * these rows were absolute, so one file read two ways looked like two files. And once everything
+ * inside is short, an absolute path here means exactly one thing — something outside — which is the
+ * line a reader is scanning for.
+ */
+describe('how a path is written', () => {
+  const ROOT = '/home/me/projects/demo';
+
+  it('drops the workspace prefix', () => {
+    render(
+      <Turn
+        projectRoot={ROOT}
+        turn={turn([file({ requested: `${ROOT}/src/a.rs`, resolved: `${ROOT}/src/a.rs` })])}
+      />,
+    );
+    const row = screen.getByTestId(`file-${ROOT}/src/a.rs`);
+    expect(row.textContent).toContain('src/a.rs');
+    expect(row.textContent).not.toContain(ROOT);
+  });
+
+  it('leaves a path outside it absolute, which is the point', () => {
+    render(
+      <Turn
+        projectRoot={ROOT}
+        turn={turn([
+          file({ requested: '/etc/passwd', allowed: false, refusal: 'outside-root' }),
+        ])}
+      />,
+    );
+    expect(screen.getByTestId('file-refused-/etc/passwd').textContent).toContain('/etc/passwd');
+  });
+
+  /** A sibling directory whose name starts the same way is not inside it. */
+  it('does not shorten a path that merely shares the prefix', () => {
+    render(
+      <Turn
+        projectRoot={ROOT}
+        turn={turn([
+          file({ requested: `${ROOT}-evil/secret`, allowed: false, refusal: 'outside-root' }),
+        ])}
+      />,
+    );
+    expect(screen.getByTestId(`file-refused-${ROOT}-evil/secret`).textContent).toContain(
+      `${ROOT}-evil/secret`,
+    );
+  });
+
+  it('leaves everything alone when there is no workspace to compare against', () => {
+    render(<Turn turn={turn([file({ requested: '/w/src/a.rs', resolved: '/w/src/a.rs' })])} />);
+    expect(screen.getByTestId('file-/w/src/a.rs').textContent).toContain('/w/src/a.rs');
   });
 });

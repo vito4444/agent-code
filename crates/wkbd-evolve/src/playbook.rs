@@ -852,7 +852,10 @@ pub fn render(bullets: &[Bullet]) -> String {
     );
     for bullet in bullets {
         out.push_str("- ");
-        out.push_str(bullet.body.trim());
+        // A marker already in the body would be doubled by the one just written. Bodies are
+        // arbitrary text from a proposal, so normalising here — where the marker is added — is
+        // the only place that can be sure of the result.
+        out.push_str(bullet.body.trim().trim_start_matches(['-', '*', '\u{2022}']).trim_start());
         out.push('\n');
     }
     out
@@ -1490,5 +1493,27 @@ mod tests {
             ..input
         };
         assert!(CreditAssignmentReflector.reflect(&unknown).is_empty());
+    }
+
+    /// A body that carries its own bullet would be doubled by the one injection adds, and the
+    /// text an agent reads is the one place a stray "- - " cannot be shrugged off.
+    #[test]
+    fn a_body_that_already_has_a_marker_is_not_given_a_second() {
+        let bullet = Bullet {
+            id: "b1".into(),
+            scope: "/repo".into(),
+            body: "- run the formatter first".into(),
+            helpful: 0,
+            harmful: 0,
+            status: BulletStatus::Active,
+            source_trust: SourceTrust::Internal,
+            source_run: None,
+            expires_ms: None,
+            created_ms: 0,
+            updated_ms: 0,
+        };
+        let text = render(&[bullet]);
+        assert!(text.contains("- run the formatter first"), "{text}");
+        assert!(!text.contains("- - "), "{text}");
     }
 }

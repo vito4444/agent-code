@@ -15,21 +15,22 @@ describe("the agent's plan", () => {
    * thing that makes a long turn readable while it is still running.
    */
   it('is shown at all', () => {
-    render(<PlanPanel plans={{ main: [entry()] }} />);
+    render(<PlanPanel busy plans={{ main: [entry()] }} />);
     expect(screen.getByTestId('plan-main')).toBeTruthy();
     expect(screen.getByTestId('plan-main-entries').textContent ?? '').toContain('Read the loader');
   });
 
   it('shows nothing when there is no plan', () => {
-    expect(render(<PlanPanel plans={{}} />).container.textContent).toBe('');
+    expect(render(<PlanPanel busy plans={{}} />).container.textContent).toBe('');
     // An empty plan is the same as no plan: the agent replaced its entries with none.
-    expect(render(<PlanPanel plans={{ main: [] }} />).container.textContent).toBe('');
+    expect(render(<PlanPanel busy plans={{ main: [] }} />).container.textContent).toBe('');
   });
 
   /** The number somebody glances at between messages, and it has to read with the entries closed. */
   it('counts what is done against the whole', () => {
     render(
       <PlanPanel
+        busy
         plans={{
           main: [
             entry({ status: 'completed' }),
@@ -44,7 +45,7 @@ describe("the agent's plan", () => {
   });
 
   it('is expanded while a step is in progress', () => {
-    render(<PlanPanel plans={{ main: [entry({ status: 'in_progress' })] }} />);
+    render(<PlanPanel busy plans={{ main: [entry({ status: 'in_progress' })] }} />);
     expect(screen.getByTestId('plan-main-entries')).toBeTruthy();
   });
 
@@ -54,12 +55,12 @@ describe("the agent's plan", () => {
    * about to do.
    */
   it('is expanded when it has only just arrived and nothing has started', () => {
-    render(<PlanPanel plans={{ main: [entry({ status: 'pending' })] }} />);
+    render(<PlanPanel busy plans={{ main: [entry({ status: 'pending' })] }} />);
     expect(screen.getByTestId('plan-main-entries')).toBeTruthy();
   });
 
   it('is collapsed once everything is finished', () => {
-    render(<PlanPanel plans={{ main: [entry({ status: 'completed' })] }} />);
+    render(<PlanPanel busy plans={{ main: [entry({ status: 'completed' })] }} />);
     expect(screen.queryByTestId('plan-main-entries')).toBeNull();
   });
 
@@ -69,7 +70,7 @@ describe("the agent's plan", () => {
    */
   it('stays closed after somebody closes it', async () => {
     const user = userEvent.setup();
-    render(<PlanPanel plans={{ main: [entry({ status: 'in_progress' })] }} />);
+    render(<PlanPanel busy plans={{ main: [entry({ status: 'in_progress' })] }} />);
     await user.click(screen.getByTestId('plan-main-toggle'));
     expect(screen.queryByTestId('plan-main-entries')).toBeNull();
   });
@@ -81,7 +82,7 @@ describe("the agent's plan", () => {
    */
   it('keeps two concurrent plans apart, and names them', () => {
     render(
-      <PlanPanel plans={{ strategy: [entry()], checklist: [entry(), entry()] }} />,
+      <PlanPanel busy plans={{ strategy: [entry()], checklist: [entry(), entry()] }} />,
     );
     expect(screen.getByTestId('plan-strategy-count').textContent).toBe('0/1');
     expect(screen.getByTestId('plan-checklist-count').textContent).toBe('0/2');
@@ -90,7 +91,7 @@ describe("the agent's plan", () => {
 
   /** With one plan the id is noise — it is `main` for anything mapped from the older shape. */
   it('does not name a single plan', () => {
-    render(<PlanPanel plans={{ main: [entry()] }} />);
+    render(<PlanPanel busy plans={{ main: [entry()] }} />);
     expect(screen.queryByText('main')).toBeNull();
     expect(screen.getByText('Plan')).toBeTruthy();
   });
@@ -101,13 +102,14 @@ describe("the agent's plan", () => {
    * "pending" would state something the agent did not say.
    */
   it('shows a status it has never heard of as itself', () => {
-    render(<PlanPanel plans={{ main: [entry({ status: '_blocked' })] }} />);
+    render(<PlanPanel busy plans={{ main: [entry({ status: '_blocked' })] }} />);
     expect(screen.getByTestId('plan-unknown-_blocked').textContent).toBe('_blocked');
   });
 
   it('does not label the four it does know', () => {
     render(
       <PlanPanel
+        busy
         plans={{
           main: [
             entry({ status: 'pending' }),
@@ -120,5 +122,44 @@ describe("the agent's plan", () => {
     );
     expect(screen.queryByTestId('plan-unknown-pending')).toBeNull();
     expect(screen.queryByTestId('plan-unknown-cancelled')).toBeNull();
+  });
+});
+
+/**
+ * "working" is a claim about right now.
+ *
+ * An entry left `in_progress` when a turn ends is not work in progress — the agent said it was
+ * doing that step and then stopped saying anything, which is what a refusal, a token limit or a
+ * cancellation looks like from here. Read from the entry alone, the panel went on claiming to be
+ * working for the rest of the session, next to a turn that had visibly finished.
+ */
+describe('whether anything is actually running', () => {
+  const midway = {
+    main: [entry({ status: 'completed' }), entry({ status: 'in_progress' })],
+  };
+
+  it('says so while the turn is running', () => {
+    render(<PlanPanel busy plans={midway} />);
+    expect(screen.getByTestId('plan-main-toggle').textContent ?? '').toContain('working');
+    expect(screen.queryByTestId('plan-main-stopped')).toBeNull();
+  });
+
+  it('says where the agent stopped once the turn is over', () => {
+    render(<PlanPanel busy={false} plans={midway} />);
+    const head = screen.getByTestId('plan-main-toggle').textContent ?? '';
+    expect(head).not.toContain('working');
+    expect(head).toContain('stopped here');
+  });
+
+  it('says neither when every step finished', () => {
+    render(
+      <PlanPanel
+        busy={false}
+        plans={{ main: [entry({ status: 'completed' }), entry({ status: 'completed' })] }}
+      />,
+    );
+    const head = screen.getByTestId('plan-main-toggle').textContent ?? '';
+    expect(head).not.toContain('working');
+    expect(head).not.toContain('stopped here');
   });
 });

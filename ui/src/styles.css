@@ -968,9 +968,18 @@
   font: inherit;
 }
 
-.mention-picker li button[data-highlighted='true'],
+/* Two different things, deliberately drawn differently.
+   The mouse being over a row and the keyboard being on it are not the same state, and Enter acts
+   on the second one. The first version used --bg-muted for both, which on the paper theme is
+   *lighter* than the picker's own background by five parts in 255 — so the row Enter would have
+   chosen was, in practice, unmarked. */
 .mention-picker li button:hover {
-  background: var(--bg-muted);
+  background: var(--bg-subtle);
+}
+
+.mention-picker li button[data-highlighted='true'] {
+  background: var(--bg-subtle);
+  box-shadow: inset 2px 0 0 var(--fg-accent);
 }
 
 .mention-name {
@@ -2548,6 +2557,11 @@
   color: var(--fg-muted);
 }
 
+.proposal-times {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .proposal-runs {
   margin: var(--space-8) 0 0;
   font-size: var(--chat-font-size-xs);
@@ -2877,6 +2891,17 @@
   border-radius: var(--radius-full);
   background: var(--bg-progress-muted);
   color: var(--fg-progress);
+  font-size: var(--chat-font-size-xs);
+}
+
+/* The same slot, deliberately quieter. "Stopped here" is a fact about a turn that is over, so it
+   should not draw the eye the way something currently happening does. */
+.plan-stopped {
+  margin-left: auto;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-full);
+  border: var(--border-thin) solid var(--border-default);
+  color: var(--fg-muted);
   font-size: var(--chat-font-size-xs);
 }
 

@@ -12,8 +12,10 @@ import { ToolCallCard } from './ToolCallCard';
  * The answer gets the highest contrast in the turn. Everything above it is provenance, and
  * a reader skimming for the result should find it without reading the provenance first.
  */
-export function Turn({ turn, onAnswerPermission }: {
+export function Turn({ turn, projectRoot, onAnswerPermission }: {
   turn: TurnView;
+  /** The session's working directory, used to shorten paths inside it. */
+  projectRoot?: string | null;
   onAnswerPermission?: (requestId: string, optionId: string | null) => void;
 }) {
   const running = turn.stop_reason === null;
@@ -25,7 +27,12 @@ export function Turn({ turn, onAnswerPermission }: {
 
       <div className="turn-body">
         {turn.items.map((item, i) => (
-          <ItemView key={itemKey(item, i)} item={item} onAnswerPermission={onAnswerPermission} />
+          <ItemView
+            key={itemKey(item, i)}
+            item={item}
+            projectRoot={projectRoot}
+            onAnswerPermission={onAnswerPermission}
+          />
         ))}
       </div>
 
@@ -137,9 +144,11 @@ function tokens(n: number): string {
 
 function ItemView({
   item,
+  projectRoot,
   onAnswerPermission,
 }: {
   item: TurnItem;
+  projectRoot?: string | null;
   onAnswerPermission?: (requestId: string, optionId: string | null) => void;
 }) {
   switch (item.type) {
@@ -180,10 +189,34 @@ function ItemView({
       return <div className="turn-error">{item.message}</div>;
 
     case 'file':
-      return <FileAccessRow item={item} />;
+      return <FileAccessRow item={item} projectRoot={projectRoot} />;
 
     default:
       return null;
+  }
+}
+
+/**
+ * What was decided, as a record rather than as a label.
+ *
+ * The option's own name is what a button says — "Allow once" — and reusing it for the outcome left
+ * a card that reads like a control which does nothing when pressed. The kind carries the verb, so
+ * the past tense can come from us; the agent's wording is only quoted when the kind is one this
+ * build does not model, because then it is the only description there is.
+ */
+function outcomeText(chosen: PermissionOption | undefined): string {
+  if (!chosen) return 'Cancelled the turn';
+  switch (chosen.kind) {
+    case 'allow_once':
+      return 'Allowed, this once';
+    case 'allow_always':
+      return 'Allowed, and remembered for operations like this';
+    case 'reject_once':
+      return 'Refused';
+    case 'reject_always':
+      return 'Refused, and remembered for operations like this';
+    default:
+      return `Answered: ${chosen.name}`;
   }
 }
 
@@ -238,7 +271,7 @@ export function PermissionCard({
         </div>
       ) : answered ? (
         <div className="permission-outcome">
-          {chosen ? chosen.name : 'cancelled'}
+          {outcomeText(chosen)}
           {auto && (
             <span
               className="permission-auto"
@@ -290,15 +323,19 @@ export function PermissionCard({
  */
 function FileAccessRow({
   item,
+  projectRoot,
 }: {
   item: Extract<TurnItem, { type: 'file' }>;
+  projectRoot?: string | null;
 }) {
   const verb = item.op === 'write' ? 'Wrote' : 'Read';
   if (item.allowed) {
     return (
       <div className="file-row" data-testid={`file-${item.requested}`}>
         <span className="file-op">{verb}</span>
-        <code className="file-path">{item.resolved ?? item.requested}</code>
+        <code className="file-path">
+          {relativeTo(item.resolved ?? item.requested, projectRoot)}
+        </code>
         {item.bytes !== null && <span className="file-bytes">{formatBytes(item.bytes)}</span>}
       </div>
     );
@@ -306,10 +343,25 @@ function FileAccessRow({
   return (
     <div className="file-row refused" data-testid={`file-refused-${item.requested}`}>
       <span className="file-op">Refused</span>
-      <code className="file-path">{item.requested}</code>
+      <code className="file-path">{relativeTo(item.requested, projectRoot)}</code>
       <span className="file-reason">{refusalText(item.refusal)}</span>
     </div>
   );
+}
+
+/**
+ * A path shortened against the workspace it is inside, and left alone when it is not.
+ *
+ * Two reasons, and the second is the better one. Attachments were already shown project-relative
+ * while these rows were absolute, so the same file read two ways looked like two files. And
+ * shortening only what is inside the workspace means an absolute path in this column now means
+ * exactly one thing: something outside it. `/etc/passwd` stands out from a column of short
+ * relative paths in a way it never did from a column of `/tmp/tmp.4HsqDIZUvs/fs/...`.
+ */
+function relativeTo(path: string, root: string | null | undefined): string {
+  if (!root) return path;
+  const base = root.endsWith('/') ? root : `${root}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
 }
 
 /**

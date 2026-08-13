@@ -29,6 +29,23 @@ import type { ProposalSummary, ProposalReview } from '../../lib/types';
  * the only human-readable thing in the string — truncating to eight characters threw it away and
  * left three citations that all looked identical.
  */
+/**
+ * Identical signals collapsed to one line with a count.
+ *
+ * A distilled procedure cites the same acceptance command once per occasion, so three occasions
+ * produced three identical lines. Three copies of one sentence is longer than one and says less:
+ * the reader has to compare them to discover they are the same, and the number — which is the
+ * actual evidence — was never stated. Repetition is preserved as a number rather than dropped,
+ * because "this happened three times" is the claim.
+ */
+function countRepeats(signals: string[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const s of signals) {
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return [...counts];
+}
+
 function shortenRun(id: string): string {
   const slash = id.indexOf('/');
   if (slash === -1) return id.slice(0, 8);
@@ -183,8 +200,11 @@ function ProposalDetail({ id, onDecided }: { id: string; onDecided: () => void }
         <p>{review.evidence.note}</p>
         {review.evidence.verified_signals.length > 0 && (
           <ul>
-            {review.evidence.verified_signals.map((s, i) => (
-              <li key={i}>{s}</li>
+            {countRepeats(review.evidence.verified_signals).map(([signal, times]) => (
+              <li key={signal}>
+                {signal}
+                {times > 1 && <span className="proposal-times"> ×{times}</span>}
+              </li>
             ))}
           </ul>
         )}

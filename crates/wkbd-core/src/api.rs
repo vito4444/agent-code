@@ -435,10 +435,14 @@ fn describe_payload(body: &str) -> Vec<String> {
                 ),
             })
             .collect(),
+        // One entry, because a workflow is one change. Returning the steps as separate entries put
+        // each of them in the queue's own bullet list *and* gave it a number, so every step read
+        // "• 1. write *.rs". The order matters and is carried by the prose instead.
         ProposalPayload::Workflow { name, steps, .. } => {
-            let mut out = vec![format!("Remember a workflow called {name:?}, with these steps:")];
-            out.extend(steps.iter().enumerate().map(|(i, s)| format!("{}. {s}", i + 1)));
-            out
+            vec![format!(
+                "Remember a procedure for {name:?}: {}",
+                steps.join(", then ")
+            )]
         }
         ProposalPayload::Policy { setting } => vec![match setting {
             PolicySetting::RoutingCostWeight { value } => {

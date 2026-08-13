@@ -24,12 +24,25 @@ import type { PlanEntry } from '../../lib/types';
  *
  * Once somebody has clicked, the interface stops having opinions about that block, on the same rule as
  * the reasoning band and for the same reason.
+ *
+ * ## "working" is a claim about now, so it needs to know whether anything is running
+ *
+ * An entry left `in_progress` when the turn ends is not work in progress. The agent said it was
+ * doing that step and then stopped saying anything, which happens whenever a turn ends on a
+ * refusal, a token limit or a cancellation. Reading the entry alone, the panel claimed to be
+ * working for the rest of the session — and "working" beside a finished turn is the kind of
+ * detail that makes a reader distrust everything else on the screen.
+ *
+ * The honest reading of the same state is more useful anyway: the step the agent stopped at.
  */
 export function PlanPanel({
   plans,
+  busy,
 }: {
   /** By plan id. An agent may keep several at once and the protocol requires them kept apart. */
   plans: Record<string, PlanEntry[]>;
+  /** Whether a turn is running. Without it, `in_progress` is indistinguishable from abandoned. */
+  busy: boolean;
 }) {
   const ids = Object.keys(plans).filter((id) => plans[id].length > 0);
   if (ids.length === 0) return null;
@@ -37,7 +50,7 @@ export function PlanPanel({
   return (
     <div className="plans" data-testid="plans">
       {ids.map((id) => (
-        <Plan key={id} id={id} entries={plans[id]} labelled={ids.length > 1} />
+        <Plan key={id} id={id} entries={plans[id]} labelled={ids.length > 1} busy={busy} />
       ))}
     </div>
   );
@@ -47,10 +60,12 @@ function Plan({
   id,
   entries,
   labelled,
+  busy,
 }: {
   id: string;
   entries: PlanEntry[];
   labelled: boolean;
+  busy: boolean;
 }) {
   const [override, setOverride] = useState<boolean | null>(null);
   const done = entries.filter((e) => e.status === 'completed').length;
@@ -79,7 +94,12 @@ function Plan({
         <span className="plan-count" data-testid={`plan-${id}-count`}>
           {done}/{entries.length}
         </span>
-        {running && <span className="plan-running">working</span>}
+        {running && busy && <span className="plan-running">working</span>}
+        {running && !busy && (
+          <span className="plan-stopped" data-testid={`plan-${id}-stopped`}>
+            stopped here
+          </span>
+        )}
       </button>
 
       {expanded && (

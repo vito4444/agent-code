@@ -370,7 +370,12 @@ export function App() {
                 <div className="empty">Nothing yet. Describe what you want done.</div>
               )}
               {session.turns.map((turn) => (
-                <Turn key={turn.turn} turn={turn} onAnswerPermission={answerPermission} />
+                <Turn
+                  key={turn.turn}
+                  turn={turn}
+                  projectRoot={summary?.project_root ?? null}
+                  onAnswerPermission={answerPermission}
+                />
               ))}
               {session.unknownUpdates.length > 0 && (
                 <div className="unknown-note">
@@ -401,7 +406,7 @@ export function App() {
                 composer: progress is what somebody glances at between two messages, so it belongs on
                 the path their eye takes back to the input box. Above the transcript it also arrived
                 before the prompt it was a plan for, which reads backwards. */}
-            {activeId && <PlanPanel plans={session.plans} />}
+            {activeId && <PlanPanel plans={session.plans} busy={session.busy} />}
 
             {/* With no session open the start screen carries its own input, which opens a session
                 and sends the first turn in one act. Two composers on one screen would be two answers
