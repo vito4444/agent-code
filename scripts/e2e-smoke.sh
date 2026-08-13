@@ -506,6 +506,9 @@ AT_PORT=$((PORT + 3))
 AT_PROJECT="$AT_STATE/project"
 mkdir -p "$AT_PROJECT/src"
 printf 'fn main() { println!("hi"); }\n' > "$AT_PROJECT/src/main.rs"
+# Big enough to be clipped in the protocol log, which is asserted below. A fixture that cannot
+# produce the condition makes the assertion about it pass for the wrong reason, or fail for one.
+python3 -c "open('$AT_PROJECT/src/big.rs','w').write('// padding\n' * 2000)"
 printf 'node_modules/\n' > "$AT_PROJECT/.gitignore"
 mkdir -p "$AT_PROJECT/node_modules"
 printf 'junk\n' > "$AT_PROJECT/node_modules/main.rs"
@@ -528,8 +531,10 @@ if ! curl -sf "http://127.0.0.1:$AT_PORT/api/health" > /dev/null 2>&1; then
 fi
 
 attach_turn() {
-    # $1 agent id, $2 mention path. Echoes the flattened answer text.
-    local agent="$1" path="$2" sid
+    # $1 agent id, then one or more mention paths. Echoes the flattened answer text.
+    local agent="$1" sid mentions
+    shift
+    mentions=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
     sid=$(curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions" \
         -H 'content-type: application/json' \
         -d "{\"agent_id\":\"$agent\",\"project_root\":\"$AT_PROJECT\"}" | jq -r '.id // empty')
@@ -544,7 +549,7 @@ attach_turn() {
     echo "$sid" > "$AT_STATE/last-sid"
     curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions/$sid/prompt" \
         -H 'content-type: application/json' \
-        -d "{\"text\":\"look at @$path\",\"mentions\":[\"$path\"]}" > /dev/null 2>&1
+        -d "{\"text\":\"look at these\",\"mentions\":$mentions}" > /dev/null 2>&1
     for _ in $(seq 1 100); do
         PORT="$AT_PORT" python3 "$ROOT/scripts/read-events.py" "$AT_PORT" 0 1.0 \
             > "$AT_STATE/ev.json" 2>/dev/null || echo '[]' > "$AT_STATE/ev.json"
@@ -578,7 +583,7 @@ check "completion finds the file" "src/main.rs" "$(echo "$COMPLETIONS" | jq -r '
 check "completion skips what the repository ignores" "0" \
     "$(echo "$COMPLETIONS" | jq -r '[.[]|select(.path|startswith("node_modules"))]|length')"
 
-RICH_ANSWER=$(attach_turn rich "src/main.rs")
+RICH_ANSWER=$(attach_turn rich "src/main.rs" "src/big.rs")
 case "$RICH_ANSWER" in
     *"resource main.rs"*) printf 'ok   %-64s %s\n' "the agent received the file's contents" "resource" ;;
     *) printf 'FAIL %-64s %s\n' "the agent received the file's contents" "$RICH_ANSWER"; FAILED=1 ;;
