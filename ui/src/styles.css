@@ -2029,7 +2029,12 @@
   color: var(--fg-danger);
 }
 
+/* Both span the grid, like the line they belong to. Without that they landed in the 16px column
+   the direction arrow lives in, which wrapped the button one word per line and stacked it on top
+   of the note beside it. */
 .frame-more {
+  grid-column: 1 / -1;
+  justify-self: start;
   margin-top: var(--space-4);
   padding: 0;
   border: none;
@@ -2041,8 +2046,10 @@
 }
 
 .frame-clipped {
-  margin: var(--space-4) 0 0;
+  grid-column: 1 / -1;
+  margin: var(--space-2) 0 0;
   color: var(--fg-muted);
+  font-family: var(--font-sans);
   font-size: var(--chat-font-size-xs);
   font-style: italic;
 }

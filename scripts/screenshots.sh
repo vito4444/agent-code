@@ -17,11 +17,16 @@
 # its first few assertions and then reports every remaining one against an empty string.
 # Usage: ./scripts/screenshots.sh [output-dir]
 #
-# WKBD_ONLY=paper-transcript,run-view captures just those and skips the rest, which exists because
-# the full set takes five and a half minutes and a review loop that costs five and a half minutes
-# per look is a review loop nobody runs twice. Everything still happens — the runs, the clicks, the
-# navigation — because a capture taken from a state the script did not reach is the kind of evidence
-# this script was written to stop producing. Only the file writes are skipped.
+# WKBD_ONLY=paper-transcript,run-view publishes just those, which exists because the full set takes
+# five and a half minutes and a review loop that costs that much per look is a loop nobody runs
+# twice. Everything still happens — the runs, the clicks, the navigation, and every capture — because
+# a screenshot taken from a state the script did not reach is the kind of evidence this script exists
+# to stop producing. What the filter skips is only the copy into the published directory.
+#
+# Every shot is taken, and taken into a scratch directory, because some of them are inputs: the
+# navigation rows are found by measuring `run-in-progress.png` and `sidebar-grouping.png` is a crop
+# of it. The first version of this filter skipped the write instead, and the next step then failed
+# trying to read a file that no longer existed.
 
 set -uo pipefail
 
@@ -78,11 +83,19 @@ click() {
     sleep "${3:-2.5}"
 }
 ONLY="${WKBD_ONLY:-}"
+# Where every capture lands. Publishing is a separate step, so a filtered run still leaves the
+# intermediate images the later measurements read.
+SHOTS=""
 shot() {
+    DISPLAY="$DISPLAY_NUM" import -window "$WID" "$SHOTS/$1.png" || return 1
+    publish "$1"
+}
+
+publish() {
     if [ -n "$ONLY" ] && ! printf '%s' ",$ONLY," | grep -q ",$1,"; then
         return 0
     fi
-    DISPLAY="$DISPLAY_NUM" import -window "$WID" "$OUT/$1.png" && echo "  $1.png"
+    cp "$SHOTS/$1.png" "$OUT/$1.png" && echo "  $1.png"
 }
 
 # The first clickable row on a list screen, found rather than assumed.
@@ -227,6 +240,8 @@ open(f"{work}/failplan.json", "w").write("""
 PY
 
 mkdir -p "$OUT"
+SHOTS="$WORK/shots"
+mkdir -p "$SHOTS"
 
 # ---------------------------------------------------------------- the empty shell
 #
@@ -355,7 +370,7 @@ shot run-in-progress
 # Nav positions are read from the rendered window rather than assumed, because the footer grows an
 # entry whenever a screen is added and every hard-coded offset then points one row off.
 nav_y() {
-    python3 - "$OUT/run-in-progress.png" "$1" <<'PY'
+    python3 - "$SHOTS/run-in-progress.png" "$1" <<'PY'
 import subprocess, sys, re
 png, label = sys.argv[1], sys.argv[2]
 # The footer buttons are the only text in the left column below two thirds of the height. Their rows
@@ -396,7 +411,10 @@ PROTOCOL_Y=$(nav_y protocol)
 SETTINGS_Y=$(nav_y settings)
 # The sidebar with a run in flight: workers grouped under the run and named by task, which is what
 # the grouping exists for and what the first version of it got wrong.
-convert "$OUT/run-in-progress.png" -crop 210x560+0+0 -resize 200% "$OUT/sidebar-grouping.png"
+# A crop rather than a capture: the sidebar is 200 px of a 1024 px window, and at that size the
+# grouping this illustrates is unreadable. The full-window shot it comes from is scratch.
+convert "$SHOTS/run-in-progress.png" -crop 210x560+0+0 -resize 200% "$SHOTS/sidebar-grouping.png"
+publish sidebar-grouping
 rm -f "$OUT/run-in-progress.png"
 echo "  sidebar-grouping.png"
 if [ "${RUNS_Y:-0}" -lt 100 ]; then
@@ -435,7 +453,7 @@ shot run-view
 # The two links on a task card are found by looking for them, not by counting rows. They share a row
 # and a colour, so the row has to be split by x: taking the mean of the accent pixels lands between
 # them and hits whichever is wider.
-LINKS=$(python3 - "$OUT/run-view.png" <<'PYLINKS'
+LINKS=$(python3 - "$SHOTS/run-view.png" <<'PYLINKS'
 import subprocess, sys, re
 
 out = subprocess.run(['convert', sys.argv[1], 'txt:-'], capture_output=True, text=True).stdout
