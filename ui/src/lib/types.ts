@@ -316,7 +316,7 @@ export type TurnItem =
  * a mention that quietly became a link produces an answer about a file nobody read, and from
  * the outside that is indistinguishable from the model ignoring the request.
  */
-export type SentAs = 'embedded' | 'image' | 'link';
+export type SentAs = 'embedded' | 'image' | 'audio' | 'link';
 
 export interface Attachment {
   uri: string;

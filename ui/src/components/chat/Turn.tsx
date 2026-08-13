@@ -72,6 +72,7 @@ function AttachmentList({ turn }: { turn: TurnView }) {
 function describeSentAs(sentAs: string, degraded: string | null): string {
   if (sentAs === 'embedded') return 'contents sent';
   if (sentAs === 'image') return 'image sent';
+  if (sentAs === 'audio') return 'audio sent';
   switch (degraded) {
     case 'too-large':
       return 'path only, too large to inline';

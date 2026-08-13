@@ -210,6 +210,7 @@ pub struct PromptCapabilities {
 pub enum SentAs {
     Embedded,
     Image,
+    Audio,
     Link,
 }
 

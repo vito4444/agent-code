@@ -142,6 +142,7 @@ fn resolve_one(
     let size = meta.len();
     let mime = mime_for(rel);
     let is_image = mime.starts_with("image/");
+    let is_audio = mime.starts_with("audio/");
 
     let degrade = |reason: &str| {
         (
@@ -162,7 +163,10 @@ fn resolve_one(
     if is_image && !caps.image {
         return Ok(degrade("agent-cannot-embed"));
     }
-    if !is_image && !caps.embedded_context {
+    if is_audio && !caps.audio {
+        return Ok(degrade("agent-cannot-embed"));
+    }
+    if !is_image && !is_audio && !caps.embedded_context {
         return Ok(degrade("agent-cannot-embed"));
     }
 
@@ -176,14 +180,21 @@ fn resolve_one(
         reason: e.to_string(),
     })?;
 
-    if is_image {
+    if is_image || is_audio {
         let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        // An audio block carries no `uri` field in the schema, unlike an image, so the only
+        // record of where it came from is the attachment we keep.
+        let block = if is_image {
+            json!({ "type": "image", "mimeType": mime, "data": data, "uri": uri })
+        } else {
+            json!({ "type": "audio", "mimeType": mime, "data": data })
+        };
         return Ok((
-            json!({ "type": "image", "mimeType": mime, "data": data, "uri": uri }),
+            block,
             Attachment {
                 uri,
                 name: rel.to_string(),
-                sent_as: SentAs::Image,
+                sent_as: if is_image { SentAs::Image } else { SentAs::Audio },
                 bytes: Some(size),
                 degraded: None,
             },
@@ -250,6 +261,10 @@ fn mime_for(path: &str) -> String {
         "gif" => "image/gif",
         "webp" => "image/webp",
         "svg" => "image/svg+xml",
+        "wav" => "audio/wav",
+        "mp3" => "audio/mpeg",
+        "ogg" => "audio/ogg",
+        "m4a" => "audio/mp4",
         "rs" => "text/x-rust",
         "py" => "text/x-python",
         "ts" | "tsx" => "text/typescript",
@@ -447,6 +462,26 @@ mod tests {
         assert_eq!(no.attachments[0].degraded.as_deref(), Some("agent-cannot-embed"));
     }
 
+    /// Reading the capability and then ignoring it is the failure this covers: audio was
+    /// parsed from the handshake and nothing consulted it, so a `.wav` fell through to the
+    /// binary case and went as a link to an agent that could have been handed it.
+    #[test]
+    fn audio_follows_its_own_capability() {
+        let (dir, guard) = fixture();
+        std::fs::write(dir.path().join("note.wav"), b"RIFF....WAVEfmt ").unwrap();
+
+        let with = PromptCapabilities { image: false, audio: true, embedded_context: false };
+        let r = resolve(&guard, dir.path(), &["note.wav".into()], with).unwrap();
+        assert_eq!(r.blocks[0]["type"], "audio");
+        assert_eq!(r.blocks[0]["mimeType"], "audio/wav");
+        assert_eq!(r.attachments[0].sent_as, SentAs::Audio);
+
+        let without = PromptCapabilities { image: true, audio: false, embedded_context: true };
+        let r = resolve(&guard, dir.path(), &["note.wav".into()], without).unwrap();
+        assert_eq!(r.blocks[0]["type"], "resource_link");
+        assert_eq!(r.attachments[0].degraded.as_deref(), Some("agent-cannot-embed"));
+    }
+
     /// The composer must not become the way around the boundary. The path arrives over HTTP as
     /// a string, and joining it to the root is not the same as resolving beneath the root.
     #[test]
@@ -552,11 +587,12 @@ mod tests {
         use agent_client_protocol::schema::v1;
 
         let (dir, guard) = fixture();
+        std::fs::write(dir.path().join("note.wav"), b"RIFF....WAVEfmt ").unwrap();
         let r = resolve(
             &guard,
             dir.path(),
-            &["src/main.rs".into(), "shot.png".into(), "src".into()],
-            caps(true, true),
+            &["src/main.rs".into(), "shot.png".into(), "note.wav".into(), "src".into()],
+            PromptCapabilities { image: true, audio: true, embedded_context: true },
         )
         .unwrap();
 

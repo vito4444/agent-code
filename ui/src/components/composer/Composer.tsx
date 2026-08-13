@@ -67,10 +67,14 @@ const noSearch = () => Promise.resolve([] as PathEntry[]);
  */
 function willSendAs(entry: PathEntry, caps: PromptCapabilities | undefined): string {
   if (entry.is_dir) return 'path only';
-  const image = /\.(png|jpe?g|gif|webp|svg)$/i.test(entry.path);
-  if (image) return caps?.image ? 'image' : 'path only, this agent takes no images';
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(entry.path)) {
+    return caps?.image ? 'image' : 'path only, this agent takes no images';
+  }
+  if (/\.(wav|mp3|ogg|m4a)$/i.test(entry.path)) {
+    return caps?.audio ? 'audio' : 'path only, this agent takes no audio';
+  }
   if (caps?.embedded_context) return 'contents';
-  return 'path only, this agent reads it itself';
+  return 'path only, the agent reads it itself';
 }
 
 const AUTONOMY_LABELS: Record<AutonomyLevel, string> = {
