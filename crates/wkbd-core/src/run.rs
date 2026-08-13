@@ -758,13 +758,19 @@ impl RunEngine {
 
         self.emit(
             &run_id,
+            RunEvent::TaskRouted {
+                task_id: task.id.clone(),
+                agent: agent.clone(),
+                by_router: decision.is_some(),
+            },
+        )
+        .await;
+        self.emit(
+            &run_id,
             RunEvent::TaskStateChanged {
                 task_id: task.id.clone(),
                 status: TaskStatus::Dispatched,
-                detail: Some(match &decision {
-                    Some(_) => format!("routed to {agent}"),
-                    None => format!("dispatched to {agent}"),
-                }),
+                detail: None,
             },
         )
         .await;

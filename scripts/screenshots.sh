@@ -311,6 +311,12 @@ api /api/sessions/"$S1"/prompt -X POST -H 'content-type: application/json' \
     -d '{"text":"refactor the loader and run the tests"}' > /dev/null
 answer_permission
 raise
+# Back to the live edge first. The previous capture scrolled up, and the record correctly stayed
+# where it was put rather than following the new turn — which is the behaviour, and which left
+# this capture showing the turn before the one it is a capture of.
+DISPLAY="$DISPLAY_NUM" xdotool mousemove "$((WX + 600))" "$((WY + 300))"
+DISPLAY="$DISPLAY_NUM" xdotool click --repeat 40 --delay 20 5
+sleep 1.5
 shot paper-transcript
 
 # ---------------------------------------------------------------- the file boundary

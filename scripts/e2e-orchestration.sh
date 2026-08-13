@@ -405,9 +405,17 @@ check_ge "the arms carry state a later run can start from" 1 \
 # Nominated, not inferred. Treating every configured agent as a candidate sent tasks to agents set
 # up for interactive chat, and the run failed for a reason visible only in the sidebar.
 check "only nominated agents were routed to" "true" \
-    "$(jq -r "$RUN | map(select(.event==\"task_state_changed\" and .status==\"dispatched\")) | all(.detail | test(\"worker\"))" "$E")"
-check "the log says which agent each task went to" "true" \
-    "$(jq -r "$RUN | map(select(.event==\"task_state_changed\" and .status==\"dispatched\")) | all(.detail != null)" "$E")"
+    "$(jq -r "$RUN | map(select(.event==\"task_routed\")) | all(.agent | test(\"worker\"))" "$E")"
+check "the log says which agent each task went to" "3" \
+    "$(jq -r "$RUN | map(select(.event==\"task_routed\")) | length" "$E")"
+# Its own event, not a line in the dispatch state change. A state change's detail is replaced by
+# the next one, so the choice was recorded, shown for the seconds the task spent dispatched, and
+# then erased by "completed" — which is the state anybody reading a finished run is looking at.
+check "the choice outlives the state that made it" "true" \
+    "$(jq -r "$RUN | (map(select(.event==\"task_routed\" and .task_id==\"base-module\")) | length == 1)
+       and (map(select(.event==\"task_state_changed\" and .task_id==\"base-module\" and .status==\"completed\")) | length >= 1)" "$E")"
+check "and says whether the router chose or there was only one candidate" "true" \
+    "$(jq -r "$RUN | map(select(.event==\"task_routed\")) | all(has(\"by_router\"))" "$E")"
 
 
 echo
@@ -857,10 +865,12 @@ check "the evidence is the acceptance command, not a claim" "true" \
 # `changes` is what a reviewer reads; `body_for_human` is the exact bytes that will be stored.
 # Both are checked, because a queue that renders one thing and stores another is the whole
 # reason the approval binds to a hash.
-check "the procedure records both steps, in order" "true" \
-    "$(echo "$DREVIEW" | jq -r '[.changes[]|select(test("^1\\. write \\*\\.rs$"))]|length == 1')"
-check "and the second one after it" "true" \
-    "$(echo "$DREVIEW" | jq -r '[.changes[]|select(test("^2\\. write \\*\\.md$"))]|length == 1')"
+# One entry, because a workflow is one change. Rendering the steps as separate entries put each of
+# them in the queue's own bullet list *and* numbered it, so every step read "• 1. write *.rs".
+check "the procedure is one change, not one per step" "1" \
+    "$(echo "$DREVIEW" | jq -r '.changes|length')"
+check "and it records both steps, in order" "true" \
+    "$(echo "$DREVIEW" | jq -r '.changes[0]|test("write \\*\\.rs, then write \\*\\.md")')"
 # The name is read by an agent deciding whether the procedure applies, since an approved
 # workflow is injected into every session from then on.
 check "it is named for the work it applies to" "true" \

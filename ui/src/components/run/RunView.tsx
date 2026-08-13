@@ -324,6 +324,22 @@ function TaskCard({
       {task.detail && <p className="task-detail">{task.detail}</p>}
 
       <dl className="task-facts">
+        {task.routing && (
+          <>
+            {/* Kept on the card for the life of the run, not just while the task is dispatched.
+                The choice used to live in the status change's detail, which the next status
+                change replaced — so by the time anybody read the finished run, the answer to
+                "why did this go to the expensive agent" had been erased by "completed". */}
+            <dt>Ran on</dt>
+            <dd>
+              <code>{task.routing.agent}</code>
+              <span className="task-routed-by">
+                {task.routing.by_router ? 'chosen by the router' : 'the only candidate'}
+              </span>
+            </dd>
+          </>
+        )}
+
         <dt>Files</dt>
         <dd>
           {summary.declared_paths.length === 0 ? (

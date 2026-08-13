@@ -371,6 +371,21 @@ pub enum RunEvent {
         /// Why, when the status alone does not say. A failure reason, a conflict summary.
         detail: Option<String>,
     },
+    /// Which agent a task went to, and who chose.
+    ///
+    /// Its own event rather than a line in the dispatch state change, because a state change's
+    /// detail is replaced by the next one — so the choice was recorded, displayed for the few
+    /// seconds the task spent dispatched, and then erased by the move to verifying. A choice
+    /// nobody can see is a choice nobody can question, and this one is made by a model of past
+    /// outcomes rather than by the user.
+    TaskRouted {
+        task_id: String,
+        agent: String,
+        /// True when the bandit picked. False when there was only one candidate and the choice
+        /// was the configuration's, which is worth distinguishing: nothing was learned either way,
+        /// but only one of them is the router's opinion.
+        by_router: bool,
+    },
     /// A task's isolated workspace exists and starts from this commit.
     ///
     /// The commit is the interesting part: for a task with dependencies it is a real merge of their

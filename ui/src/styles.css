@@ -1701,6 +1701,12 @@
   color: var(--fg-muted);
 }
 
+.task-routed-by {
+  margin-left: var(--space-8);
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
 .task-facts {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -2599,15 +2605,25 @@
   font-family: var(--font-sans);
 }
 
+/* Both actions carry the same weight, which is a departure from the usual primary-button
+   treatment and the reason for it is this screen's whole purpose.
+   A filled accent button is the one a reader clicks without reading, and what waits here is the
+   system asking to change its own future instructions — the target an injection is aiming for.
+   Approving is not the expected outcome to be made fast; it is a decision to be made. So the two
+   are the same size and the same weight, and only their colour says which is which. */
 .proposal-actions button {
   font: inherit;
   font-size: var(--chat-font-size-s);
   padding: var(--space-4) var(--space-16);
-  border: none;
+  border: var(--border-thin) solid var(--fg-accent);
   border-radius: var(--radius-medium);
-  background: var(--bg-accent-emphasis);
-  color: var(--fg-on-emphasis);
+  background: var(--bg-default);
+  color: var(--fg-accent);
   cursor: pointer;
+}
+
+.proposal-actions button:hover:not(:disabled) {
+  background: var(--bg-subtle);
 }
 
 .proposal-actions button.quiet {

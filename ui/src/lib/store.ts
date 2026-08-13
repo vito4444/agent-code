@@ -84,6 +84,8 @@ export interface TaskState {
   status: TaskStatus;
   /** Why, when the status alone does not say it. */
   detail: string | null;
+  /** Which agent ran it, and whether the router chose. Null until it is dispatched. */
+  routing: { agent: string; by_router: boolean } | null;
   workspace: TaskWorkspaceView | null;
   verification: TaskVerificationView | null;
 }
@@ -669,7 +671,14 @@ export function applyRunOne(state: RunState, event: RunEvent, atMs?: number): Ru
         // anything the orchestrator does redo arrives as its own state change.
         tasks[summary.id] = previous
           ? { ...previous, summary }
-          : { summary, status: 'pending', detail: null, workspace: null, verification: null };
+          : {
+              summary,
+              status: 'pending',
+              detail: null,
+              routing: null,
+              workspace: null,
+              verification: null,
+            };
       }
       return {
         ...state,
@@ -688,6 +697,12 @@ export function applyRunOne(state: RunState, event: RunEvent, atMs?: number): Ru
           { problems: event.problems, attempt: event.attempt },
         ],
       };
+
+    case 'task_routed':
+      return mapTask(state, event.task_id, (t) => ({
+        ...t,
+        routing: { agent: event.agent, by_router: event.by_router },
+      }));
 
     case 'task_state_changed':
       return mapTask(state, event.task_id, (t) => ({

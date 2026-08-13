@@ -142,6 +142,7 @@ export type RunEvent =
   | { event: 'planned'; tasks: TaskSummary[]; waves: string[][]; attempt: number }
   | { event: 'plan_rejected'; problems: string[]; attempt: number }
   | { event: 'task_state_changed'; task_id: string; status: TaskStatus; detail: string | null }
+  | { event: 'task_routed'; task_id: string; agent: string; by_router: boolean }
   | {
       event: 'task_workspace_ready';
       task_id: string;
