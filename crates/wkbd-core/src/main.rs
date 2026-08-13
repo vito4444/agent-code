@@ -14,6 +14,7 @@
 
 mod api;
 mod fs_bridge;
+mod inventory;
 mod learn;
 mod mentions;
 mod planner;

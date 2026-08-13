@@ -686,6 +686,83 @@ check "work that finished keeps its branch" "true" \
 kill "$DAEMON3_PID" 2>/dev/null || true
 wait "$DAEMON3_PID" 2>/dev/null || true
 
+# ---------------------------------------------------------------- the test inventory
+#
+# A planner that invents a regression guard should be sent back before a worker spends a turn on
+# it. The first graph claims a test that was already passing and names one nobody wrote; the
+# second names the one that is really there.
+#
+# The asymmetry between the two assertion fields is what this covers. `must_pass` may name a test
+# the task is about to write, so it is not checked against the repository — a validator that did
+# would refuse every task doing test-driven work.
+echo
+echo "the test inventory"
+INV_STATE=$(mktemp -d)
+IPORT=$((PORT + 6))
+IREPO="$WORK/invrepo"
+mkdir -p "$IREPO/src" "$IREPO/tests"
+(
+    cd "$IREPO" && git init -q . && git config user.email t@e && git config user.name t
+    printf '#!/bin/sh\n[ -f src/n.rs ] && echo "test unit::already_here ... ok"\necho "test unit::brand_new ... ok"\necho "test result: ok. done"\n' > tests/check.sh
+    printf 'fn already_here() {}\n' > src/existing.rs
+    git add -A && git commit -q -m initial
+)
+cat > "$WORK/invplan.json" <<'INVPLAN'
+[
+ {"goal":"add n","tasks":[
+  {"id":"n","title":"add n","body":"WRITE src/n.rs <<<// n\n>>>",
+   "declared_paths":["src/n.rs"],"depends_on":[],
+   "verify":{"cmd":"sh tests/check.sh","must_pass":["unit::brand_new"],
+             "must_still_pass":["unit::never_written_by_anyone"],
+             "immutable_paths":["tests/**"]}}]},
+ {"goal":"add n","tasks":[
+  {"id":"n","title":"add n","body":"WRITE src/n.rs <<<// n\n>>>",
+   "declared_paths":["src/n.rs"],"depends_on":[],
+   "verify":{"cmd":"sh tests/check.sh","must_pass":["unit::brand_new"],
+             "must_still_pass":["unit::already_here"],
+             "immutable_paths":["tests/**"]}}]}
+]
+INVPLAN
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$INV_STATE" --listen "127.0.0.1:$IPORT" \
+    --agent "worker=Worker=$ROOT/target/debug/fake-acp-agent --profile worker" \
+    --worker-agent worker --fixed-plan "$WORK/invplan.json" > "$WORK/daemon-inv.log" 2>&1 &
+IDAEMON_PID=$!
+for _ in $(seq 1 80); do
+    curl -sf "http://127.0.0.1:$IPORT/api/health" > /dev/null 2>&1 && break
+    sleep 0.25
+done
+IRID=$(curl -sf -X POST "http://127.0.0.1:$IPORT/api/runs" -H 'content-type: application/json' \
+    -d "{\"goal\":\"add n\",\"project_root\":\"$IREPO\"}" | jq -r '.id // empty')
+for _ in $(seq 1 80); do
+    ISTATUS=$(curl -sf "http://127.0.0.1:$IPORT/api/runs" \
+        | jq -r --arg i "$IRID" '.runs[]|select(.id==$i)|.status')
+    case "$ISTATUS" in awaiting_merge|failed|cancelled) break ;; esac
+    sleep 0.3
+done
+IE=$(curl -sf "http://127.0.0.1:$IPORT/api/runs/$IRID")
+
+check "the invented regression guard was rejected" "true" \
+    "$(echo "$IE" | jq -r '[.events[].payload.run|select(.event=="plan_rejected")
+        |.problems[]|select(test("never_written_by_anyone"))]|length >= 1')"
+# And rejected for the right reason, not incidentally.
+check "the problem names it as an unknown test" "true" \
+    "$(echo "$IE" | jq -r '[.events[].payload.run|select(.event=="plan_rejected")
+        |.problems[]|select(test("unknown|does not exist|not found";"i"))]|length >= 1')"
+# The second graph's must_pass still names a test that does not exist in the repository, and it
+# must not be what fails: the task is allowed to create it.
+check "a test the task will write is not held against it" "awaiting_merge" "${ISTATUS:-none}"
+# A rejected graph is never announced as a plan, so the run has one plan and one rejection:
+# it took two attempts and executed the second.
+check "the run executed one graph, on its second attempt" "true" \
+    "$(echo "$IE" | jq -r '([.events[].payload.run|select(.event=="planned")]|length == 1)
+        and ([.events[].payload.run|select(.event=="plan_rejected")]|length == 1)')"
+
+kill "$IDAEMON_PID" 2>/dev/null || true
+wait "$IDAEMON_PID" 2>/dev/null || true
+rm -rf "$INV_STATE"
+
 # ---------------------------------------------------------------- distillation
 #
 # The third learning loop, end to end: the same shape of work succeeding on three separate

@@ -107,8 +107,13 @@ fn an_acceptance_spec_with_no_assertions_is_rejected() {
     )));
 }
 
+/// The inventory judges the regression set, and only the regression set.
+///
+/// `must_pass` names what has to pass after the change and is expected to fail before it, so a
+/// task that writes a new test names one that does not exist yet. `must_still_pass` claims a test
+/// was already passing, and one that does not exist is a planner inventing a guard.
 #[test]
-fn an_assertion_naming_a_test_that_does_not_exist_is_rejected() {
+fn an_invented_regression_guard_is_rejected_and_a_new_test_is_not() {
     struct Known(&'static [&'static str]);
     impl TestInventory for Known {
         fn contains(&self, test_id: &str) -> bool {
@@ -116,12 +121,26 @@ fn an_assertion_naming_a_test_that_does_not_exist_is_rejected() {
         }
     }
 
-    let draft = DraftGraph { goal: "g".into(), tasks: vec![task("a", &[], &[])] };
+    // A task whose `must_pass` names a test nobody has written yet. This is test-driven work,
+    // not a mistake, and validating it against the current repository would refuse it.
+    let mut writing_a_test = task("a", &[], &[]);
+    writing_a_test.verify.must_pass = vec!["config::loads".into()];
+    writing_a_test.verify.must_still_pass.clear();
+    let draft = DraftGraph { goal: "g".into(), tasks: vec![writing_a_test] };
+    validate(&draft, &Known(&["something::else"]))
+        .expect("a task may name a test it is about to write");
+
+    // The same identifier as a regression guard is a claim about the past, and false.
+    let mut guarding = task("a", &[], &[]);
+    guarding.verify.must_pass = vec!["config::new_behaviour".into()];
+    guarding.verify.must_still_pass = vec!["config::loads".into()];
+    let draft = DraftGraph { goal: "g".into(), tasks: vec![guarding.clone()] };
     let problems = validate(&draft, &Known(&["something::else"])).unwrap_err();
     assert!(problems.iter().any(
         |p| matches!(p, GraphProblem::UnknownTest { test, .. } if test == "config::loads")
     ));
 
+    let draft = DraftGraph { goal: "g".into(), tasks: vec![guarding] };
     validate(&draft, &Known(&["config::loads"])).expect("a real test id validates");
 }
 

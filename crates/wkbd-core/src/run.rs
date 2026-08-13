@@ -31,7 +31,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
-use wkbd_orch::graph::AnyTest;
 use wkbd_orch::{
     check_ownership, drain_merge_queue, prepare_workspace, validate, CargoTestParser, DraftGraph,
     DraftTask, MergeQueueOutcome, QueueEntry, RetryPolicy, VerifyOutcome, Verifier, Workflow,
@@ -274,14 +273,30 @@ impl RunEngine {
         let ctx = PlanContext {
             project_root: project_root.to_string(),
             repo_summary: repo_summary(&repo),
-            // Left empty deliberately: enumerating tests means running the test binary, which for
-            // an unknown repository means running whatever its build does. The validator degrades
-            // to accepting any identifier rather than skipping validation, and that trade is
-            // recorded here rather than hidden inside the validator.
+            // Still empty, and now for a narrower reason. Enumerating a repository's tests means
+            // running its build; recognising whether a name somebody proposed appears in the tree
+            // does not, and that is what the inventory below does. Recognising is the easier half
+            // and it is the half the validator needs — offering the planner a list of "known
+            // tests" would mean producing one, which is the half that costs a build.
             known_tests: Vec::new(),
         };
 
-        let mut graph = self.plan(&wf, goal, &ctx).await?;
+        // One scan per run, used by every validation including the ones after a redraft. A few
+        // seconds separate them and the tree does not move in between.
+        let scan_root = repo.clone();
+        let inventory = tokio::task::spawn_blocking(move || {
+            crate::inventory::RepoTests::scan(&scan_root)
+        })
+        .await
+        .unwrap_or_else(|_| crate::inventory::RepoTests::unavailable());
+        tracing::debug!(
+            project = %project_root,
+            tokens = inventory.token_count(),
+            partial = inventory.is_partial(),
+            "scanned the project for test names"
+        );
+
+        let mut graph = self.plan(&wf, goal, &ctx, &inventory).await?;
 
         // Work that has already been accepted, kept across a redraft.
         //
@@ -292,7 +307,7 @@ impl RunEngine {
         let mut accepted: HashMap<String, Option<String>> = HashMap::new();
         let mut attempt: u32 = 0;
         let (validated, queue, failed) = loop {
-        let validated = validate(&graph, &AnyTest)
+        let validated = validate(&graph, &inventory)
             .map_err(|problems| anyhow!("the graph did not validate: {problems:?}"))?;
 
         let summaries: Vec<TaskSummary> = validated
@@ -608,7 +623,14 @@ impl RunEngine {
     }
 
     /// Drafts and validates, redrafting while the validator keeps saying no.
-    async fn plan(&self, wf: &Workflow, goal: &str, ctx: &PlanContext) -> Result<DraftGraph> {
+    async fn plan(
+        &self,
+        wf: &Workflow,
+        goal: &str,
+        ctx: &PlanContext,
+        // Send + Sync because the plan loop holds it across an await on the model.
+        inventory: &(dyn wkbd_orch::graph::TestInventory + Send + Sync),
+    ) -> Result<DraftGraph> {
         let run_id = wf.run_id().to_string();
         let mut previous: Option<DraftGraph> = None;
         let mut problems: Vec<String> = Vec::new();
@@ -631,7 +653,7 @@ impl RunEngine {
                 })
                 .await?;
 
-            match validate(&graph, &AnyTest) {
+            match validate(&graph, inventory) {
                 Ok(_) => return Ok(graph),
                 Err(found) => {
                     problems = describe_problems(&found);

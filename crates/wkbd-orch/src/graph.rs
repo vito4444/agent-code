@@ -167,7 +167,20 @@ pub fn validate(
                 },
             });
         }
-        for test in task.verify.must_pass.iter().chain(&task.verify.must_still_pass) {
+        // Only the regression set is checked against the inventory, and the asymmetry is the
+        // whole point of having two fields.
+        //
+        // `must_pass` names what has to pass *after* the change and is expected to fail before
+        // it, so a task that writes a new test names one that does not exist yet. That is the
+        // ordinary case, not an error. Checking it here would reject exactly the tasks doing
+        // test-driven work — and it did check it, harmlessly, for as long as the only inventory
+        // in the tree accepted everything. The first real inventory would have turned a dormant
+        // mistake into a validator that refuses correct plans.
+        //
+        // `must_still_pass` is the opposite claim: it names tests that were passing already. One
+        // that does not exist is a planner inventing a regression guard, which is worth catching
+        // before a worker spends a turn on it.
+        for test in &task.verify.must_still_pass {
             if !inventory.contains(test) {
                 problems.push(GraphProblem::UnknownTest {
                     task: task.id.clone(),
