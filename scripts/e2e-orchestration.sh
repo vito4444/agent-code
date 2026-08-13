@@ -800,7 +800,7 @@ plan = {"goal": "one small change", "tasks": [{
     "declared_paths": ["src/mod.rs", "NOTES.md"], "depends_on": [],
     "verify": {"cmd": "sh tests/check.sh", "must_pass": ["unit::x"],
                "immutable_paths": ["tests/**"]}}]}
-open(sys.argv[1], "w").write(json.dumps([plan] * 4))
+open(sys.argv[1], "w").write(json.dumps([plan] * 5))
 DISTPLAN
 
 "$ROOT/target/debug/wkbd-core" \
@@ -883,6 +883,35 @@ check "a fourth run does not queue it again" "1" "$(proposals_of_kind workflow)"
 check "it is waiting, not in effect" "true" \
     "$(curl -sf "http://127.0.0.1:$DPORT/api/proposals" | jq -r --arg i "$DPID" \
         '[.proposals[]|select(.id==$i)]|length == 1')"
+
+# The last link, and the one that was missing for most of this project's life: an approved note
+# has to reach the next session. The worker reports whether the prelude carried one, because the
+# daemon's own logs can only say what it meant to send.
+DHASH=$(echo "$DREVIEW" | jq -r '.content_hash')
+DAPPROVE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$DPORT/api/proposals/$DPID/approve" -H 'content-type: application/json' \
+    -d "{\"content_hash\":\"$DHASH\"}")
+check "the procedure can be approved" "200" "$DAPPROVE"
+
+DRID=$(curl -sf -X POST "http://127.0.0.1:$DPORT/api/runs" -H 'content-type: application/json' \
+    -d "{\"goal\":\"small change 5\",\"project_root\":\"$DREPO\"}" | jq -r '.id // empty')
+for _ in $(seq 1 80); do
+    DSTATUS=$(curl -sf "http://127.0.0.1:$DPORT/api/runs" \
+        | jq -r --arg id "$DRID" '.runs[]|select(.id==$id)|.status')
+    [ "$DSTATUS" = "awaiting_merge" ] && break
+    case "$DSTATUS" in failed|cancelled) break ;; esac
+    sleep 0.3
+done
+check "a run after the approval still finishes" "awaiting_merge" "${DSTATUS:-none}"
+
+# A worker works in a throwaway worktree. Scoped there it would have no rules, no facts and no
+# notes, because nobody has written anything about a directory that did not exist a moment ago.
+DWORKER=$(PORT="$DPORT" python3 "$ROOT/scripts/read-events.py" "$DPORT" 0 1.5 2> /dev/null \
+    | jq -r '[.[]|select(.payload.event=="segment_chunk")]|map(.payload.text)|join("")')
+case "$DWORKER" in
+    *"[notes: yes]"*) printf 'ok   %-64s %s\n' "the approved note reached the next worker" "yes" ;;
+    *) printf 'FAIL %-64s %s\n' "the approved note reached the next worker" "${DWORKER:-nothing}"; FAILED=1 ;;
+esac
 
 kill "$DDAEMON_PID" 2>/dev/null || true
 wait "$DDAEMON_PID" 2>/dev/null || true

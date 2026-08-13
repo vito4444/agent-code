@@ -255,9 +255,12 @@ fn worker(prompt: &str) -> Vec<Step> {
         wrote += 1;
     }
 
+    // Reports whether the prelude carried approved working notes. The client's own logs can
+    // only say what it meant to send; this is the only place that can say what arrived.
+    let notes = if prompt.contains("## Working notes") { "yes" } else { "no" };
     steps.push(Step::Emit(message(
         Some("m2"),
-        &format!("wrote {wrote} file(s)"),
+        &format!("wrote {wrote} file(s) [notes: {notes}]"),
     )));
     steps
 }
