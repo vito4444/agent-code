@@ -70,11 +70,11 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace              # 294 tests
-cd ui && pnpm vitest run            # 132 tests
+cargo test --workspace              # 299 tests
+cd ui && pnpm vitest run            # 153 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
-./scripts/e2e-smoke.sh              # 51 assertions, the conversation slice
-./scripts/e2e-orchestration.sh      # 69 assertions, one run start to finish
+./scripts/e2e-smoke.sh              # 55 assertions, the conversation slice
+./scripts/e2e-orchestration.sh      # 70 assertions, one run start to finish
 ```
 
 The two end-to-end checks are the ones to run before believing anything works. Every defect in
@@ -444,6 +444,24 @@ It now compares the two elements to each other.
 **Three identical rows for three different pieces of work.** Orchestrated workers are rooted at
 `worktrees/<run>/<task>`, and the sidebar truncated the path from the right — which is where the
 distinguishing part is. All three read `/home/me/.local/state/wkbd/worktre…`.
+
+### Found by comparing against other clients
+
+**The v2 plan update was parsed as an empty plan.** ACP v1 flattens a plan's `entries` onto the
+update; v2 removed that variant and replaced it with `plan_update`, which nests them under a `plan`
+object carrying a `planId`. This read only the v1 position while accepting both discriminators, so a
+v2 agent's plan matched, produced no entries, and reported no unknown update — the plan arrived
+silently blank, which is the worst of the three possible failures. Both shapes are read now, plans are
+keyed by id because v2 lets an agent keep several at once, and an unrecognised priority or status is
+kept verbatim rather than mapped onto a default: the spec reserves plain names for future versions and
+requires custom ones to begin with `_`, so an unfamiliar value means a newer agent, and calling it
+`pending` would state something the agent did not.
+
+**The plan was never rendered.** It had been arriving, being stored, and being dropped since the first
+day. An agent that reports a plan is saying the shape of the work before it does it, which is the one
+thing that makes a long turn readable while it is still running. It sits above the composer rather
+than above the transcript, for the same reason the context ring is in the composer: progress is what
+somebody glances at between two messages, so it belongs on the path their eye takes back to the input.
 
 ### Found by writing the script that regenerates the screenshots
 

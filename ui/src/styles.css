@@ -2610,3 +2610,282 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* ── The agent's plan ────────────────────────────────────────────────────────────────────────
+   Above the transcript because it is current state rather than something that happened: the protocol
+   replaces it wholesale on every update, and a mutating block inside a scrolling record appears to say
+   different things at different scroll positions. */
+
+.plans {
+  flex: 0 0 auto;
+  padding: 0 var(--space-16) var(--space-8);
+  max-width: var(--conversation-max-width);
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
+}
+
+.plan {
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  margin-bottom: var(--space-8);
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-6) var(--space-12);
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* The same drawn arrow as the reasoning band, for the same reason: every glyph tried for it sat wrong
+   in at least one font. */
+.plan-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-subtle);
+}
+
+.plan-caret::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease-out;
+}
+
+.plan[data-expanded='true'] .plan-caret::before {
+  transform: rotate(45deg);
+}
+
+.plan-label {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+/* The headline. It has to be legible with the entries closed, because it is the number somebody
+   glances at between messages. */
+.plan-count {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-default);
+}
+
+.plan-running {
+  margin-left: auto;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-full);
+  background: var(--bg-progress-muted);
+  color: var(--fg-progress);
+  font-size: var(--chat-font-size-xs);
+}
+
+.plan-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-12) var(--space-8) var(--space-12);
+}
+
+.plan-entries li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-2) 0;
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-muted);
+}
+
+.plan-mark {
+  flex: 0 0 auto;
+  width: 12px;
+  text-align: center;
+  color: var(--fg-subtle);
+}
+
+/* The three distinctions a plan exists to make. Done recedes, running is the only coloured row, and
+   what has not started is the default — so the eye lands on the one thing happening now. */
+.plan-entries li[data-status='completed'] {
+  color: var(--fg-subtle);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-default);
+}
+
+.plan-entries li[data-status='completed'] .plan-mark {
+  color: var(--fg-success);
+}
+
+.plan-entries li[data-status='in_progress'] {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+
+.plan-entries li[data-status='in_progress'] .plan-mark {
+  color: var(--fg-progress);
+}
+
+.plan-entries li[data-status='cancelled'] {
+  color: var(--fg-disabled);
+  text-decoration: line-through;
+}
+
+/* A status this build does not recognise, shown as itself. Drawing it as "pending" would state
+   something the agent did not say. */
+.plan-unknown {
+  margin-left: auto;
+  padding: 0 var(--space-6);
+  border: var(--border-thin) solid var(--border-muted);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+}
+
+/* ── Settings ────────────────────────────────────────────────────────────────────────────────
+   Small, and honest about being small: it offers what the daemon can actually change. */
+
+.settings {
+  max-width: 780px;
+  margin: var(--space-32) auto;
+  padding: 0 var(--space-16);
+  font-family: var(--font-serif);
+}
+
+.settings h1 {
+  margin: 0 0 var(--space-24);
+  font-size: var(--chat-font-size-xxl);
+  font-weight: 600;
+}
+
+.settings-group {
+  margin-bottom: var(--space-32);
+}
+
+.settings-group h2 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-l);
+  font-weight: 600;
+}
+
+.settings-note,
+.settings-empty {
+  margin: 0 0 var(--space-16);
+  font-size: var(--chat-font-size-s);
+  line-height: var(--prose-line-height);
+  color: var(--fg-muted);
+}
+
+.theme-list,
+.settings-agents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+}
+
+.theme-list button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'name swatches' 'note swatches';
+  gap: var(--space-2) var(--space-16);
+  align-items: center;
+  width: 100%;
+  margin-bottom: var(--space-8);
+  padding: var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.theme-list button[data-active='true'] {
+  border-color: var(--fg-accent);
+  background: var(--bg-default);
+}
+
+.theme-name {
+  grid-area: name;
+  font-size: var(--chat-font-size-s);
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+.theme-note {
+  grid-area: note;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.theme-swatches {
+  grid-area: swatches;
+  display: flex;
+  gap: var(--space-4);
+}
+
+.theme-swatches i {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-small);
+  border: var(--border-thin) solid var(--border-muted);
+}
+
+/* Each preview renders that theme's own variables, so a theme that changes cannot leave a stale
+   swatch behind. The blocks below are the only place a theme is named outside tokens.css. */
+[data-theme-preview='paper'] i[data-swatch='bg'] { background: #f5f3ee; }
+[data-theme-preview='paper'] i[data-swatch='fg'] { background: #2b2926; }
+[data-theme-preview='paper'] i[data-swatch='accent'] { background: #b8542f; }
+[data-theme-preview='paper'] i[data-swatch='success'] { background: #3f6d41; }
+[data-theme-preview='paper'] i[data-swatch='danger'] { background: #a8342b; }
+
+[data-theme-preview='primer'] i[data-swatch='bg'] { background: #ffffff; }
+[data-theme-preview='primer'] i[data-swatch='fg'] { background: #1f2328; }
+[data-theme-preview='primer'] i[data-swatch='accent'] { background: #0969da; }
+[data-theme-preview='primer'] i[data-swatch='success'] { background: #1a7f37; }
+[data-theme-preview='primer'] i[data-swatch='danger'] { background: #d1242f; }
+
+[data-theme-preview='dark'] i[data-swatch='bg'] { background: #0d1117; }
+[data-theme-preview='dark'] i[data-swatch='fg'] { background: #f0f6fc; }
+[data-theme-preview='dark'] i[data-swatch='accent'] { background: #4493f8; }
+[data-theme-preview='dark'] i[data-swatch='success'] { background: #3fb950; }
+[data-theme-preview='dark'] i[data-swatch='danger'] { background: #f85149; }
+
+.settings-agents li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-12);
+  padding: var(--space-6) 0;
+  border-top: var(--border-thin) solid var(--border-muted);
+  font-size: var(--chat-font-size-s);
+}
+
+.settings-agents li:first-child {
+  border-top: none;
+}
+
+.settings-agents code {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-code);
+}
+
+.settings-live {
+  margin-left: auto;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}

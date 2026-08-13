@@ -237,7 +237,11 @@ pub enum EventPayload {
     /// the same label.
     UsageChanged { used: u64, size: u64, cost: Option<CostView> },
 
-    PlanChanged { entries: Vec<PlanEntryView> },
+    /// The agent's plan for this turn, replacing whatever it last said about this plan id.
+    ///
+    /// Replaced wholesale rather than merged, because the protocol requires the agent to send every
+    /// entry on every update. Merging would keep an entry the agent had dropped.
+    PlanChanged { plan_id: String, entries: Vec<PlanEntryView> },
 
     /// A `sessionUpdate` variant we do not model. Recorded rather than dropped so that
     /// the raw-message inspector can show what we ignored, and so a future variant

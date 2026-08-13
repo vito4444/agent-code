@@ -41,7 +41,12 @@ pub enum RawUpdate {
         content: Vec<ToolContent>,
         locations: Vec<ToolLocation>,
     },
-    Plan { entries: Vec<PlanEntryView> },
+    /// A plan, keyed by the id the agent gave it.
+    ///
+    /// v2 lets an agent keep several plans at once — a high-level strategy beside a detailed
+    /// checklist — and requires the client to track them separately. A single slot would have the
+    /// second plan silently replace the first, which reads as a plan that keeps rewriting itself.
+    Plan { plan_id: String, entries: Vec<PlanEntryView> },
     ConfigOptions { options: Vec<ConfigOptionView> },
     Usage { used: u64, size: u64, cost: Option<CostView> },
     Unknown { discriminant: String, raw: String },
@@ -215,7 +220,9 @@ impl Normalizer {
                 });
                 out
             }
-            RawUpdate::Plan { entries } => vec![EventPayload::PlanChanged { entries }],
+            RawUpdate::Plan { plan_id, entries } => {
+                vec![EventPayload::PlanChanged { plan_id, entries }]
+            }
             RawUpdate::ConfigOptions { options } => {
                 vec![EventPayload::ConfigOptionsChanged { options }]
             }

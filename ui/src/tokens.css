@@ -106,10 +106,20 @@
   --fg-default: #2b2926;
   --fg-muted: #6b6660;
   --fg-subtle: #918b82;
+  /* Two more steps down, named for what they are for rather than by how faint they are. Both were
+     being approximated with `subtle`, which meant a placeholder and a disabled control were
+     indistinguishable from a caption. */
+  --fg-placeholder: #a8a29a;
+  --fg-disabled: #b8b2a9;
   /* Coral rather than blue. On cream a blue link is the one element that looks pasted on, and warm
      accents keep the page one object. */
   --fg-accent: #b8542f;
   --fg-success: #3f6d41;
+  /* Work that is happening now, as distinct from work that succeeded.
+     There was no colour for this: a step in progress and a step nobody has started were both muted
+     grey, which is the one distinction a plan exists to make. */
+  --fg-progress: #3f5d8a;
+  --bg-progress-muted: #e4e9f1;
   --fg-danger: #a8342b;
   --fg-attention: #8a6320;
   --fg-on-emphasis: #fdfcf9;
@@ -167,6 +177,10 @@
   --fg-attention: #9a6700;
   --fg-on-emphasis: #ffffff;
   --fg-code: #0550ae;
+  --fg-progress: #0969da;
+  --bg-progress-muted: #ddf4ff;
+  --fg-placeholder: #9198a1;
+  --fg-disabled: #afb8c1;
 
   --bg-default: #ffffff;
   --bg-muted: #f6f8fa;
@@ -208,6 +222,10 @@
   --fg-danger: #f85149;
   --fg-attention: #d29922;
   --fg-on-emphasis: #ffffff;
+  --fg-progress: #4493f8;
+  --bg-progress-muted: #121d2f;
+  --fg-placeholder: #6e7681;
+  --fg-disabled: #545d68;
 
   --bg-default: #0d1117;
   --bg-muted: #151b23;

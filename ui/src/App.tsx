@@ -7,13 +7,15 @@ import { RunList, StartRun } from './components/run/RunList';
 import { RunView } from './components/run/RunView';
 import { SessionList, asWorker } from './components/sidebar/SessionList';
 import { StartHere } from './components/chat/StartHere';
+import { PlanPanel } from './components/chat/PlanPanel';
+import { Settings, applyTheme, readTheme } from './components/settings/Settings';
 import { ProposalQueue } from './components/proposals/ProposalQueue';
 import { ReviewSurface } from './components/review/ReviewSurface';
 import * as api from './lib/api';
 import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
 
-type Screen = 'chat' | 'rules' | 'inspector' | 'runs' | 'proposals';
+type Screen = 'chat' | 'rules' | 'inspector' | 'runs' | 'proposals' | 'settings';
 
 /**
  * The session a run's worker had, by task.
@@ -105,6 +107,12 @@ export function App() {
       })
       .catch(() => {});
   }, [knownIds, streamedIds]);
+
+  // The saved theme, applied before anything is drawn. Without this the interface flashes the default
+  // and then corrects itself, which reads as a bug in the theme rather than in the order of operations.
+  useEffect(() => {
+    applyTheme(readTheme());
+  }, []);
 
   // Which agents exist at all. Fetched once: the set is fixed at daemon startup, since an agent is a
   // command line the daemon was told about.
@@ -220,6 +228,14 @@ export function App() {
           >
             Protocol log
           </button>
+          <button
+            type="button"
+            data-active={screen === 'settings'}
+            onClick={() => setScreen('settings')}
+            data-testid="nav-settings"
+          >
+            Settings
+          </button>
           <span className="connection" data-connected={store.connected}>
             {store.connected ? 'connected' : 'reconnecting…'}
           </span>
@@ -235,6 +251,7 @@ export function App() {
         )}
 
         {screen === 'proposals' && <ProposalQueue />}
+        {screen === 'settings' && <Settings agents={agents} />}
         {screen === 'rules' && <RulesScreen projectRoot={summary?.project_root ?? null} />}
         {screen === 'inspector' && <RawInspector />}
 
@@ -337,6 +354,16 @@ export function App() {
                 </div>
               )}
             </div>
+
+            {/* Between the transcript and the composer, and outside the scrolling record.
+                Outside because a plan is replaced wholesale on every update — it is current state
+                rather than something that happened at a point in time, and a mutating block inside a
+                scrolling record appears to say different things at different scroll positions.
+                Here rather than above the transcript for the same reason the context ring is in the
+                composer: progress is what somebody glances at between two messages, so it belongs on
+                the path their eye takes back to the input box. Above the transcript it also arrived
+                before the prompt it was a plan for, which reads backwards. */}
+            {activeId && <PlanPanel plans={session.plans} />}
 
             {/* With no session open the start screen carries its own input, which opens a session
                 and sends the first turn in one act. Two composers on one screen would be two answers

@@ -268,7 +268,7 @@ for y in sorted(rows):
     current.append(y)
 if current:
     bands.append(current)
-order = ['runs', 'proposals', 'rules', 'protocol']
+order = ['runs', 'proposals', 'rules', 'protocol', 'settings']
 try:
     band = bands[order.index(label)]
 except (ValueError, IndexError):
@@ -281,6 +281,7 @@ PY
 RUNS_Y=$(nav_y runs)
 PROPOSALS_Y=$(nav_y proposals)
 RULES_Y=$(nav_y rules)
+SETTINGS_Y=$(nav_y settings)
 # The sidebar with a run in flight: workers grouped under the run and named by task, which is what
 # the grouping exists for and what the first version of it got wrong.
 convert "$OUT/run-in-progress.png" -crop 210x560+0+0 -resize 200% "$OUT/sidebar-grouping.png"
@@ -290,7 +291,7 @@ if [ "${RUNS_Y:-0}" -lt 100 ]; then
     echo "could not locate the sidebar navigation; refusing to click blindly"
     exit 1
 fi
-echo "  nav: runs=$RUNS_Y proposals=$PROPOSALS_Y rules=$RULES_Y"
+echo "  nav: runs=$RUNS_Y proposals=$PROPOSALS_Y rules=$RULES_Y settings=$SETTINGS_Y"
 
 click 30 "$RUNS_Y"
 shot run-list
@@ -406,6 +407,14 @@ fi
 # ---------------------------------------------------------------- the rules screen
 click 30 "$RULES_Y"
 shot user-rules
+
+# ---------------------------------------------------------------- settings
+if [ "${SETTINGS_Y:-0}" -gt 100 ]; then
+    click 30 "$SETTINGS_Y"
+    shot settings
+else
+    echo "  (could not locate settings; skipping settings.png)"
+fi
 
 # ---------------------------------------------------------------- a proposal
 #

@@ -112,7 +112,12 @@ pub struct ViewBuilder {
     perm_index: HashMap<String, (usize, usize)>,
     pub latest_usage: Option<(u64, u64, Option<CostView>)>,
     pub config_options: Vec<ConfigOptionView>,
-    pub plan: Vec<PlanEntryView>,
+    /// The agent's plans, by the id it gave each one.
+    ///
+    /// A map rather than a list, because v2 lets an agent keep several at once and requires the client
+    /// to track them separately. One slot would let the second plan silently replace the first, which
+    /// reads as a plan that keeps rewriting itself.
+    pub plans: std::collections::BTreeMap<String, Vec<PlanEntryView>>,
     pub unknown_updates: Vec<(String, String)>,
     /// Every file access attempted on the agent's behalf, allowed or not. The audit trail for
     /// the one interface where an unsandboxed process acts for a sandboxed one.
@@ -306,8 +311,10 @@ impl ViewBuilder {
             EventPayload::UsageChanged { used, size, cost } => {
                 self.latest_usage = Some((*used, *size, cost.clone()));
             }
-            EventPayload::PlanChanged { entries } => {
-                self.plan = entries.clone();
+            EventPayload::PlanChanged { plan_id, entries } => {
+                // Replaced, not merged. The protocol requires every entry on every update, so
+                // merging would keep an entry the agent had dropped.
+                self.plans.insert(plan_id.clone(), entries.clone());
             }
             EventPayload::UnknownUpdate { discriminant, raw } => {
                 self.unknown_updates.push((discriminant.clone(), raw.clone()));

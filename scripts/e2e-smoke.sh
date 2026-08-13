@@ -466,7 +466,20 @@ if [ -n "$SID3" ]; then
     # Every attempt is recorded, allowed or not. Enforcement with no record cannot be audited.
     check_ge "boundary: attempts recorded" 8 \
         "$(jq -r '[.[]|select(.payload.event=="file_access")]|length' "$E3")"
-    check "boundary: refusals are recorded, not swallowed" "true" \
+    # The plan, in both shapes the protocol has had. The v2 shape nests its entries under a `plan` object,
+# and reading only the v1 position matches the discriminator and yields an empty list — the plan arrives
+# silently blank, which is the worst of the three possible failures.
+check "the plan arrived and was not blank" "true" \
+    "$(jq -r '[.[]|select(.payload.event=="plan_changed")]|length >= 2' "$EVENTS")"
+check "the v2 shape was read, not dropped" "3" \
+    "$(jq -r '[.[]|select(.payload.event=="plan_changed")]|last|.payload.entries|length' "$EVENTS")"
+# Replaced wholesale, which is what the protocol requires. A merge would leave four entries.
+check "the later plan replaced the earlier one" "completed" \
+    "$(jq -r '[.[]|select(.payload.event=="plan_changed")]|last|.payload.entries[0].status' "$EVENTS")"
+check "both updates landed under the same id" "1" \
+    "$(jq -r '[.[]|select(.payload.event=="plan_changed")]|map(.payload.plan_id)|unique|length' "$EVENTS")"
+
+check "boundary: refusals are recorded, not swallowed" "true" \
         "$(jq -r '[.[]|select(.payload.event=="file_access" and .payload.allowed==false)]|length >= 5' "$E3")"
 else
     echo "FAIL could not open a session against the probing agent"

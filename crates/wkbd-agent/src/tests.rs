@@ -268,7 +268,14 @@ async fn a_real_turn_from_a_real_process_produces_several_thought_segments() {
     );
 
     assert_eq!(b.context_percent(), Some(26.5), "usage was reported, so show it");
-    assert_eq!(b.plan.len(), 2);
+    // Keyed by the id the agent gave it. This double sends the plan twice — once in the v1 shape,
+    // which maps to `main`, and once in the v2 shape under the same id — so what is asserted is the
+    // replacement rather than a count: the later update has three entries with the first finished,
+    // and a client that merged instead of replacing would have four.
+    let plan = b.plans.get("main").expect("a plan under the v1 synthetic id");
+    assert_eq!(plan.len(), 3, "{plan:?}");
+    assert_eq!(plan[0].status, "completed");
+    assert_eq!(plan[1].status, "in_progress");
 }
 
 #[tokio::test]

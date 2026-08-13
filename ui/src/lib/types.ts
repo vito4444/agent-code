@@ -213,7 +213,17 @@ export type EventPayload =
     }
   | { event: 'config_options_changed'; options: ConfigOption[] }
   | { event: 'usage_changed'; used: number; size: number; cost: Cost | null }
-  | { event: 'plan_changed'; entries: PlanEntry[] }
+  | {
+      /**
+       * The agent's plan for this turn, replacing whatever it last said about this id.
+       *
+       * Replaced rather than merged: the protocol requires the agent to send every entry on every
+       * update, so merging would keep an entry the agent had dropped.
+       */
+      event: 'plan_changed';
+      plan_id: string;
+      entries: PlanEntry[];
+    }
   | { event: 'run'; run: RunEvent }
   | { event: 'unknown_update'; discriminant: string; raw: string }
   | { event: 'agent_error'; message: string }

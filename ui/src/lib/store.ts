@@ -43,7 +43,8 @@ export interface SessionState {
   turns: TurnView[];
   configOptions: ConfigOption[];
   usage: { used: number; size: number; cost: Cost | null } | null;
-  plan: PlanEntry[];
+  /** The agent's plans, by the id it gave each one. */
+  plans: Record<string, PlanEntry[]>;
   unknownUpdates: { discriminant: string; raw: string }[];
   /** True while a prompt is outstanding, i.e. the agent owes us a stop reason. */
   busy: boolean;
@@ -55,7 +56,7 @@ export function emptySession(): SessionState {
     turns: [],
     configOptions: [],
     usage: null,
-    plan: [],
+    plans: {},
     unknownUpdates: [],
     busy: false,
     queue: [],
@@ -515,8 +516,14 @@ export function applyOne(state: SessionState, payload: EventPayload): SessionSta
         usage: { used: payload.used, size: payload.size, cost: payload.cost },
       };
 
+    // Keyed by id. The protocol lets an agent keep several plans at once — a high-level strategy
+    // beside a detailed checklist — and requires them kept apart; one slot would let the second
+    // silently replace the first, which reads as a plan that keeps rewriting itself.
     case 'plan_changed':
-      return { ...state, plan: payload.entries };
+      return {
+        ...state,
+        plans: { ...state.plans, [payload.plan_id]: payload.entries },
+      };
 
     case 'unknown_update':
       return {

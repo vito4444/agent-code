@@ -335,6 +335,24 @@ fn rich(prompt: &str) -> Vec<Step> {
             "content": [{ "type": "content", "content": { "type": "text",
                 "text": "pub fn load() -> Config {\n    parse(read_file(PATH))\n}" } }]
         })),
+        // The same plan again, in the v2 shape, with the first entry finished and a third added.
+        //
+        // Two things at once. The nested shape is what v2 sends and what a client reading only the v1
+        // position parses as an empty plan — silently, because the discriminator still matches. And
+        // sending a *different* set of entries under the same id is what the protocol requires: the
+        // client replaces what it had rather than merging, so an entry the agent dropped disappears.
+        Step::Emit(json!({
+            "sessionUpdate": "plan_update",
+            "plan": {
+                "type": "items",
+                "planId": "main",
+                "entries": [
+                    { "content": "Find the loader", "priority": "high", "status": "completed" },
+                    { "content": "Fix the ordering", "priority": "medium", "status": "in_progress" },
+                    { "content": "Run the tests", "priority": "low", "status": "pending" }
+                ]
+            }
+        })),
         // Second thought in the same turn. A naive implementation expands this one *and*
         // the first, which is the bug this whole scenario exists to catch.
         Step::Emit(thought(Some("m2"), "It reads the file twice. I need to see the caller.")),

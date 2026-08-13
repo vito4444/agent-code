@@ -264,15 +264,37 @@ pub fn map_session_update(update: &Value, live_switchable: bool) -> RawUpdate {
                 locations: parse_locations(update.get("locations")),
             }
         }
-        "plan" | "plan_update" => RawUpdate::Plan {
-            entries: update
-                .get("entries")
+        // Both plan shapes.
+        //
+        // v1 flattens `entries` onto the update. v2 removed that variant entirely and replaced it with
+        // `plan_update`, which nests a `plan` object carrying `planId` and `entries`. Reading only the
+        // v1 position — which is what this did — matches the v2 discriminator, produces an empty entry
+        // list, and reports no unknown update: the plan arrives and is silently blank, which is the
+        // worst of the three possible failures.
+        //
+        // The synthetic id for the v1 shape is `main`, which is what the spec tells adapters to use
+        // when mapping v1 forward.
+        "plan" | "plan_update" => {
+            let nested = update.get("plan");
+            let plan_id = nested
+                .and_then(|p| p.get("planId").or_else(|| p.get("plan_id")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("main")
+                .to_string();
+            let entries = nested
+                .and_then(|p| p.get("entries"))
+                .or_else(|| update.get("entries"))
                 .and_then(|v| v.as_array())
                 .map(|arr| {
                     arr.iter()
                         .filter_map(|e| {
                             Some(PlanEntryView {
                                 content: e.get("content")?.as_str()?.to_string(),
+                                // Kept verbatim, including values this build has never heard of. The
+                                // spec reserves plain names for future variants and requires custom
+                                // ones to start with `_`, so an unrecognised value is either a newer
+                                // protocol or a deliberate extension — and mapping it onto `medium`
+                                // or `pending` would state something the agent did not.
                                 priority: e
                                     .get("priority")
                                     .and_then(|v| v.as_str())
@@ -287,8 +309,10 @@ pub fn map_session_update(update: &Value, live_switchable: bool) -> RawUpdate {
                         })
                         .collect()
                 })
-                .unwrap_or_default(),
-        },
+                .unwrap_or_default();
+            RawUpdate::Plan { plan_id, entries }
+        }
+
         "config_option_update" => RawUpdate::ConfigOptions {
             options: parse_config_options(update.get("configOptions"), live_switchable),
         },
@@ -324,5 +348,119 @@ pub fn map_session_update(update: &Value, live_switchable: bool) -> RawUpdate {
             discriminant: if other.is_empty() { "(missing)".into() } else { other.to_string() },
             raw: update.to_string(),
         },
+    }
+}
+
+#[cfg(test)]
+mod plan_shape_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parse(update: serde_json::Value) -> RawUpdate {
+        map_session_update(&update, false)
+    }
+
+    /// The v1 shape, which flattens the entries onto the update.
+    #[test]
+    fn reads_the_flat_v1_plan() {
+        let got = parse(json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                { "content": "Read the loader", "priority": "high", "status": "in_progress" },
+                { "content": "Add a cache", "priority": "medium", "status": "pending" }
+            ]
+        }));
+        match got {
+            RawUpdate::Plan { plan_id, entries } => {
+                // The synthetic id the spec tells adapters to use when mapping v1 forward, so that a
+                // v1 plan and a v2 plan land in the same slot rather than accumulating as two.
+                assert_eq!(plan_id, "main");
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].status, "in_progress");
+            }
+            other => panic!("expected a plan, got {other:?}"),
+        }
+    }
+
+    /// The v2 shape, which nests them under a `plan` object with an id. Reading only the v1 position
+    /// matched this discriminator, produced an empty entry list, and reported no unknown update: the
+    /// plan arrived silently blank, which is the worst of the three possible failures.
+    #[test]
+    fn reads_the_nested_v2_plan_update() {
+        let got = parse(json!({
+            "sessionUpdate": "plan_update",
+            "plan": {
+                "type": "items",
+                "planId": "plan-1",
+                "entries": [
+                    { "content": "Check for syntax errors", "priority": "high", "status": "pending" }
+                ]
+            }
+        }));
+        match got {
+            RawUpdate::Plan { plan_id, entries } => {
+                assert_eq!(plan_id, "plan-1");
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].content, "Check for syntax errors");
+            }
+            other => panic!("expected a plan, got {other:?}"),
+        }
+    }
+
+    /// Two plans at once, which v2 allows and requires the client to keep apart.
+    #[test]
+    fn distinguishes_two_concurrent_plans() {
+        let a = parse(json!({
+            "sessionUpdate": "plan_update",
+            "plan": { "type": "items", "planId": "strategy", "entries": [] }
+        }));
+        let b = parse(json!({
+            "sessionUpdate": "plan_update",
+            "plan": { "type": "items", "planId": "checklist", "entries": [] }
+        }));
+        match (a, b) {
+            (RawUpdate::Plan { plan_id: x, .. }, RawUpdate::Plan { plan_id: y, .. }) => {
+                assert_ne!(x, y);
+            }
+            other => panic!("expected two plans, got {other:?}"),
+        }
+    }
+
+    /// The spec reserves plain names for future variants and requires custom ones to start with `_`,
+    /// so an unrecognised value is either a newer protocol or a deliberate extension. Mapping it onto
+    /// `medium` or `pending` would state something the agent did not.
+    #[test]
+    fn keeps_a_status_this_build_has_never_heard_of() {
+        let got = parse(json!({
+            "sessionUpdate": "plan_update",
+            "plan": { "type": "items", "planId": "main", "entries": [
+                { "content": "Wait for review", "priority": "_urgent", "status": "_blocked" }
+            ]}
+        }));
+        match got {
+            RawUpdate::Plan { entries, .. } => {
+                assert_eq!(entries[0].priority, "_urgent");
+                assert_eq!(entries[0].status, "_blocked");
+            }
+            other => panic!("expected a plan, got {other:?}"),
+        }
+    }
+
+    /// A missing field defaults rather than dropping the entry: an entry with no stated priority is
+    /// still an entry, and losing it would understate the plan.
+    #[test]
+    fn an_entry_without_a_priority_still_counts() {
+        let got = parse(json!({
+            "sessionUpdate": "plan_update",
+            "plan": { "type": "items", "planId": "main", "entries": [{ "content": "Do it" }] }
+        }));
+        match got {
+            RawUpdate::Plan { entries, .. } => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].priority, "medium");
+                assert_eq!(entries[0].status, "pending");
+            }
+            other => panic!("expected a plan, got {other:?}"),
+        }
     }
 }
