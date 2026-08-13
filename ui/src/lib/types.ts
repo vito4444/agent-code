@@ -322,6 +322,28 @@ export interface SessionSummary {
  * its base commit — is folded from the run's events, because a summary that duplicated them
  * would be a second source of truth able to disagree with the log about what happened.
  */
+/** One file, before and after, as the daemon read it out of two commits. */
+export interface FileChange {
+  path: string;
+  /** Null when the file did not exist in the earlier commit. */
+  old_text: string | null;
+  /** Null when the file is gone in the later commit. */
+  new_text: string | null;
+  /**
+   * Why the contents are absent when it is not because the file was added or deleted: `binary` or
+   * `too-large`. Marked rather than truncated, because a truncated diff looks like a small change.
+   */
+  omitted: string | null;
+}
+
+export interface ChangeSet {
+  from: string;
+  to: string;
+  files: FileChange[];
+  /** Files that changed and are not listed because the daemon's cap was reached. */
+  truncated: number;
+}
+
 /** A row in the approval queue. Deliberately without a body: see `ProposalQueue`. */
 export interface ProposalSummary {
   id: string;

@@ -7,8 +7,14 @@
  *
  * The algorithm is a longest-common-subsequence over lines. It is not the cleverest
  * possible diff, but it is deterministic and has no dependency, and for the sizes that
- * appear inline the difference is not visible. Anything large enough for the difference to
- * matter should be opened in the review surface instead.
+ * appear inline the difference is not visible.
+ *
+ * The truncation note used to say "open the review surface", and there was no review surface. A
+ * reference to somewhere that does not exist is worse than the truncation it apologises for, because
+ * it tells the reader a way to see the whole thing exists. It now states the fact and nothing more:
+ * the transcript is a record of a conversation, and the two places a change can be read at full
+ * width — a task's card and the merge gate — reach the surface from there, where the two commits to
+ * compare are known. Nothing in a tool-call card knows them.
  */
 
 export interface DiffViewProps {
@@ -62,7 +68,7 @@ export function DiffView({ path, oldText, newText, maxLines = 60 }: DiffViewProp
       </table>
       {truncated && (
         <div className="diff-truncated">
-          {rows.length - maxLines} more lines. Open the review surface to see the whole change.
+          {rows.length - maxLines} more lines, not shown here.
         </div>
       )}
     </div>

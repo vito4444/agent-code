@@ -36,6 +36,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/runs/{id}/merge", post(merge_run))
         .route("/api/runs/{id}/abandon", post(abandon_run))
         .route("/api/runs/{id}/cancel", post(cancel_run))
+        .route("/api/runs/{id}/tasks/{task}/diff", get(task_diff))
+        .route("/api/runs/{id}/candidate/diff", get(candidate_diff))
         .route("/api/proposals", get(list_proposals))
         .route("/api/proposals/{id}", get(review_proposal))
         .route("/api/proposals/{id}/approve", post(approve_proposal))
@@ -397,6 +399,144 @@ async fn reject_proposal(
         .await
         .map_err(|e| ApiError::conflict(&e.to_string()))?;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// How many files one request will read either side of.
+///
+/// A cap rather than a judgement about what is reviewable: the alternative is a request that reads a
+/// whole repository into the daemon because a task touched a generated directory.
+const MAX_REVIEW_FILES: usize = 200;
+
+/// What one task changed.
+///
+/// From its own starting commit to its result, which for a dependent task means the diff excludes
+/// everything its dependencies produced — it starts from a merge of them. That is the diff worth
+/// reviewing: the question at a task card is what *this* task did, and a diff against the run base
+/// would answer a different one.
+async fn task_diff(
+    State(state): State<Arc<AppState>>,
+    Path((id, task)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (_, project_root) = run_row(&state, &id).await?;
+    let (from, to) = task_range(&state, &id, &task).await?;
+    let set = wkbd_vcs::changes_between(
+        std::path::Path::new(&project_root),
+        &from,
+        &to,
+        MAX_REVIEW_FILES,
+    )
+    .map_err(ApiError::internal)?;
+    Ok(Json(set))
+}
+
+/// What the whole run would add to the branch.
+async fn candidate_diff(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (_, project_root) = run_row(&state, &id).await?;
+    let (base, candidate) = candidate_range(&state, &id).await?;
+    let set = wkbd_vcs::changes_between(
+        std::path::Path::new(&project_root),
+        &base,
+        &candidate,
+        MAX_REVIEW_FILES,
+    )
+    .map_err(ApiError::internal)?;
+    Ok(Json(set))
+}
+
+async fn run_row(state: &Arc<AppState>, run_id: &str) -> Result<(String, String), ApiError> {
+    let id = run_id.to_string();
+    state
+        .store
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT goal, project_root FROM runs WHERE id = ?1",
+                [&id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?)
+        })
+        .await
+        .map_err(|_| ApiError { status: StatusCode::NOT_FOUND, message: "no such run".into() })
+}
+
+/// The two commits a task's diff is taken between, read back out of the run's own events.
+///
+/// From the log rather than from a table, because the log is the record either way and a second copy
+/// of the same fact is a second copy that can disagree with it.
+async fn task_range(
+    state: &Arc<AppState>,
+    run_id: &str,
+    task_id: &str,
+) -> Result<(String, String), ApiError> {
+    let stream = wkbd_proto::run_stream_id(run_id);
+    let (events, _) = state
+        .store
+        .read_since(Some(&stream), 0, 10_000)
+        .map_err(ApiError::internal)?;
+
+    let mut from = None;
+    for event in &events {
+        if let wkbd_proto::EventPayload::Run { run } = &event.payload {
+            if let wkbd_proto::RunEvent::TaskWorkspaceReady { task_id: t, start_commit, .. } = run {
+                if t == task_id {
+                    from = Some(start_commit.clone());
+                }
+            }
+        }
+    }
+
+    let from = from.ok_or_else(|| {
+        ApiError { status: StatusCode::NOT_FOUND, message: "that task has no workspace".into() }
+    })?;
+
+    // The branch tip, rather than a commit recorded in an event. A task's result is a commit made in
+    // its worktree, and the branch is what points at it — reading the ref means this answers
+    // correctly for a task that is still working, where a recorded final commit does not exist yet.
+    let engine = state
+        .runs()
+        .ok_or_else(|| ApiError::not_implemented("runs are not configured"))?;
+    let to = engine
+        .task_tip(run_id, task_id)
+        .await
+        .map_err(|e| ApiError { status: StatusCode::NOT_FOUND, message: e.to_string() })?;
+    Ok((from, to))
+}
+
+async fn candidate_range(
+    state: &Arc<AppState>,
+    run_id: &str,
+) -> Result<(String, String), ApiError> {
+    let stream = wkbd_proto::run_stream_id(run_id);
+    let (events, _) = state
+        .store
+        .read_since(Some(&stream), 0, 10_000)
+        .map_err(ApiError::internal)?;
+
+    let mut base = None;
+    let mut candidate = None;
+    for event in &events {
+        if let wkbd_proto::EventPayload::Run { run } = &event.payload {
+            match run {
+                wkbd_proto::RunEvent::Started { base_commit, .. } => {
+                    base = Some(base_commit.clone())
+                }
+                wkbd_proto::RunEvent::AwaitingMerge { commit, .. } => {
+                    candidate = Some(commit.clone())
+                }
+                _ => {}
+            }
+        }
+    }
+
+    match (base, candidate) {
+        (Some(b), Some(c)) => Ok((b, c)),
+        _ => Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: "this run has no candidate to review".into(),
+        }),
+    }
 }
 
 /// Stops a run.

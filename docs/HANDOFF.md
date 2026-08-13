@@ -70,11 +70,11 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace              # 287 tests
-cd ui && pnpm vitest run            # 122 tests
+cargo test --workspace              # 294 tests
+cd ui && pnpm vitest run            # 132 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 51 assertions, the conversation slice
-./scripts/e2e-orchestration.sh      # 63 assertions, one run start to finish
+./scripts/e2e-orchestration.sh      # 69 assertions, one run start to finish
 ```
 
 The two end-to-end checks are the ones to run before believing anything works. Every defect in
@@ -579,7 +579,13 @@ nothing appears outside it.
 - ~~**The Tauri shell.**~~ Written and running. See `docs/reference/shell/` for screenshots taken on
   this machine and for two claims in this document that turned out to be wrong — including the one
   that said it could not be built here.
-- **A full-screen review surface.** Inline diffs link to one that does not exist.
+- ~~**A full-screen review surface.**~~ Built, and it closes two things at once: a task card could
+  say a task passed and give no way to see what it did, and the inline diffs pointed at a review
+  surface that did not exist. A task's diff is taken from its own starting commit, so a dependent
+  task's excludes whatever its dependencies produced — the question at a task card is what *that*
+  task did. The merge gate reaches the same surface for the whole candidate, above the buttons rather
+  than beside them, because the gate's argument is that acceptance is not the same as the change being
+  wanted and the only way to decide the second is to read it.
 - **Terminal support.** `terminal/*` is refused. Embedded terminal content reports that rather
   than showing output.
 - **Windows.** Interfaces are in place (`wkbd-sec::reaper` has the Job Object slot) and return

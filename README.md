@@ -60,11 +60,11 @@ cd ui && pnpm dev     # proxies /api, WebSocket included
 ## Checks
 
 ```bash
-cargo test --workspace       # 287 tests
-cd ui && pnpm vitest run         # 122 tests
+cargo test --workspace       # 294 tests
+cd ui && pnpm vitest run         # 132 tests
 ./scripts/m0-mergetree.sh    # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh       # 51 assertions, the conversation slice
-./scripts/e2e-orchestration.sh # 63 assertions, one run start to finish
+./scripts/e2e-orchestration.sh # 69 assertions, one run start to finish
 ```
 
 Run `e2e-smoke.sh` before believing anything works. Every defect listed in section 5 of the

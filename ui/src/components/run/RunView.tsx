@@ -21,6 +21,7 @@ export function RunView({
   run,
   onBack,
   onOpenTranscript,
+  onReview,
 }: {
   run: RunState;
   onBack?: () => void;
@@ -33,6 +34,8 @@ export function RunView({
    * one click away and unreachable from here.
    */
   onOpenTranscript?: (taskId: string) => void;
+  /** Opens the full-width diff for one task, or for the candidate when no task is named. */
+  onReview?: (taskId: string | null) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -140,6 +143,7 @@ export function RunView({
                     key={taskId}
                     task={task}
                     onOpenTranscript={onOpenTranscript}
+                    onReview={onReview}
                   />
                 ) : (
                   <p className="task-missing" key={taskId} data-testid={`task-missing-${taskId}`}>
@@ -238,6 +242,19 @@ export function RunView({
               </ul>
             </div>
           )}
+          {onReview && (
+            /* Before the buttons, and deliberately. The gate's whole argument is that acceptance is
+               not the same as the change being wanted, and the only way to decide the second is to
+               read it. */
+            <button
+              type="button"
+              className="merge-review"
+              onClick={() => onReview(null)}
+              data-testid="review-candidate"
+            >
+              Read the whole change first
+            </button>
+          )}
           <div className="merge-actions">
             <button
               type="button"
@@ -284,9 +301,12 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
 function TaskCard({
   task,
   onOpenTranscript,
+  onReview,
 }: {
   task: TaskState;
   onOpenTranscript?: (taskId: string) => void;
+  /** Opens the full-width diff for one task, or for the candidate when no task is named. */
+  onReview?: (taskId: string | null) => void;
 }) {
   const { summary } = task;
 
@@ -392,18 +412,32 @@ function TaskCard({
         <Verdict taskId={summary.id} verification={task.verification} />
       )}
 
-      {onOpenTranscript && (
-        /* Only when a session for this task still exists. A link that leads nowhere is worse than no
-           link: it says the record is there and then proves it is not. */
-        <button
-          type="button"
-          className="task-transcript"
-          onClick={() => onOpenTranscript(summary.id)}
-          data-testid={`task-${summary.id}-transcript`}
-        >
-          Open the worker&rsquo;s transcript
-        </button>
-      )}
+      <div className="task-links">
+        {onReview && task.workspace && (
+          /* Only once the task has a workspace, because before that there are no two commits to
+             compare. */
+          <button
+            type="button"
+            className="task-transcript"
+            onClick={() => onReview(summary.id)}
+            data-testid={`task-${summary.id}-diff`}
+          >
+            See what it changed
+          </button>
+        )}
+        {onOpenTranscript && (
+          /* Only when a session for this task still exists. A link that leads nowhere is worse than
+             no link: it says the record is there and then proves it is not. */
+          <button
+            type="button"
+            className="task-transcript"
+            onClick={() => onOpenTranscript(summary.id)}
+            data-testid={`task-${summary.id}-transcript`}
+          >
+            Open the worker&rsquo;s transcript
+          </button>
+        )}
+      </div>
     </article>
   );
 }

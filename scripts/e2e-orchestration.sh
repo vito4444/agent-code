@@ -325,6 +325,30 @@ check "the run's recorded status says it is waiting" "awaiting_merge" \
     "$(curl -sf "http://127.0.0.1:$PORT/api/runs" | jq -r --arg id "$RUN_ID" '.runs[]|select(.id==$id)|.status')"
 
 echo
+echo "--- what each task actually did"
+# The gap this closes: a card could say a task passed and give no way to see what it did, while the
+# transcript and the diff were both on disk. A task's diff is taken from its own starting commit, so
+# for a dependent task it excludes everything its dependencies produced — the question at a task card
+# is what *this* task did.
+TD=$(curl -sf "http://127.0.0.1:$PORT/api/runs/$RUN_ID/tasks/base-module/diff")
+check "a task's diff is available" "true" "$([ -n "$TD" ] && echo true || echo false)"
+check "it names the file that task wrote" "src/base.rs" \
+    "$(echo "$TD" | jq -r '.files[0].path')"
+check "a file the task created has no earlier version" "null" \
+    "$(echo "$TD" | jq -r '.files[0].old_text')"
+# The load-bearing one. feature-a starts from a merge of its dependencies, so its own diff must not
+# contain their files — a diff against the run base would show all three and answer a different
+# question.
+FD=$(curl -sf "http://127.0.0.1:$PORT/api/runs/$RUN_ID/tasks/feature-a/diff")
+check "a dependent task's diff excludes its dependencies' work" "src/a.rs" \
+    "$(echo "$FD" | jq -r '[.files[].path] | join(",")')"
+# And the whole candidate, which is the diff the merge decision is about.
+CD=$(curl -sf "http://127.0.0.1:$PORT/api/runs/$RUN_ID/candidate/diff")
+check "the candidate diff carries every task's work" "3" \
+    "$(echo "$CD" | jq -r '.files | length')"
+check "nothing was left out of it" "0" "$(echo "$CD" | jq -r '.truncated')"
+
+echo
 echo "--- and then a person merges"
 MERGED=$(curl -sf -X POST "http://127.0.0.1:$PORT/api/runs/$RUN_ID/merge" | jq -r '.commit // empty')
 check "the merge produced a commit" "true" "$([ -n "$MERGED" ] && echo true || echo false)"

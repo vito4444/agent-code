@@ -141,6 +141,20 @@ stale daemon holding it makes the new one fail to bind and exit — after which 
 adopting it is indirect: agents that were configured are missing, a flag has no effect, the interface
 is a version behind. The daemon now reports its pid on `/api/health` and the shell compares it.
 
+## Reading a change
+
+`review-task.png` and `review-candidate.png` are the same surface answering two questions, and the
+pair is the point of putting them next to each other. The first is what one task did: a single file,
+because a task's diff is taken from its own starting commit and that task's dependencies produced the
+other two. The second is what the whole run would add: all three. A task diff against the run base
+would have shown three files in both, and answered the wrong question at the task card.
+
+The surface exists partly because a reference to it already did. The inline diffs in a transcript are
+deliberately small and their truncation note said "open the review surface", and there was no review
+surface — a dead reference is worse than the truncation it apologises for, because it tells the reader
+a way to see the whole thing exists. The note now states the fact and stops; the two places that know
+which commits to compare, a task card and the merge gate, reach the surface from there.
+
 ## Two things from the references that were not adopted
 
 **The user's message is still a quote line, not a right-aligned bubble.** Both references bubble it,

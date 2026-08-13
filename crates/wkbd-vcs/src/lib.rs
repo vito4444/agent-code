@@ -25,12 +25,14 @@ mod git;
 pub mod immutable;
 pub mod merge;
 pub mod ownership;
+pub mod review;
 mod pathset;
 pub mod worktree;
 
 pub use error::{Result, VcsError};
 pub use merge::{create_integration_commit, predict_merge, ConflictedPath, Identity, MergePrediction};
 pub use ownership::{changed_paths, changed_paths_including_worktree, check_ownership, OwnershipVerdict};
+pub use review::{changes_between, ChangeSet, FileChange};
 pub use worktree::{
     add_worktree, hydrate, is_branch_checked_out, list_worktrees, remove_worktree, HydrationSpec,
     SetupCommand, Worktree, WorktreeInfo,
@@ -58,4 +60,13 @@ pub fn update_head(repo: &std::path::Path, commit: &str) -> Result<()> {
         return Err(out.error());
     }
     Ok(())
+}
+
+/// Resolves a revision — a branch name, a tag, a short hash — to a full commit id.
+///
+/// Errors when it does not name a commit, rather than returning the input. A caller that got its
+/// input back would go on to use a branch name where an immutable id was required, and the branch
+/// moves.
+pub fn resolve(repo: &std::path::Path, rev: &str) -> Result<String> {
+    git::resolve_commit(repo, rev)
 }

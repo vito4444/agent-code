@@ -10,13 +10,14 @@
 import type { Rule } from '../components/rules/RulesScreen';
 import type {
   AgentSummary,
+  ChangeSet,
   ProposalReview,
   ProposalSummary,
   RunSummary,
   SessionSummary,
 } from './types';
 
-export type { AgentSummary, ProposalReview, ProposalSummary, SessionSummary };
+export type { AgentSummary, ChangeSet, ProposalReview, ProposalSummary, SessionSummary };
 
 const base = '/api';
 
@@ -78,6 +79,18 @@ export function approveProposal(
 
 export function rejectProposal(id: string): Promise<void> {
   return accepted(`/proposals/${encodeURIComponent(id)}/reject`, { method: 'POST' });
+}
+
+/** What one task changed, from its own starting commit rather than from the run base. */
+export function taskDiff(runId: string, taskId: string): Promise<ChangeSet> {
+  return json(
+    `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/diff`,
+  );
+}
+
+/** What the whole run would add to the branch. */
+export function candidateDiff(runId: string): Promise<ChangeSet> {
+  return json(`/runs/${encodeURIComponent(runId)}/candidate/diff`);
 }
 
 export function listAgents(): Promise<AgentSummary[]> {

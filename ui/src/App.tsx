@@ -8,6 +8,7 @@ import { RunView } from './components/run/RunView';
 import { SessionList, asWorker } from './components/sidebar/SessionList';
 import { StartHere } from './components/chat/StartHere';
 import { ProposalQueue } from './components/proposals/ProposalQueue';
+import { ReviewSurface } from './components/review/ReviewSurface';
 import * as api from './lib/api';
 import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
@@ -40,6 +41,10 @@ export function App() {
   const [autonomy, setAutonomy] = useState<AutonomyLevel>('ask_outside_sandbox');
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [agents, setAgents] = useState<api.AgentSummary[]>([]);
+  /** `{ runId, taskId }`, where a null task means the run's whole candidate. */
+  const [reviewing, setReviewing] = useState<{ runId: string; taskId: string | null } | null>(
+    null,
+  );
   const streamRef = useRef<EventStream | null>(null);
 
   // The stream is created once. Recreating it on state change would reconnect on every
@@ -235,10 +240,30 @@ export function App() {
 
         {screen === 'runs' && (
           <section className="runs">
-            {activeRun ? (
+            {reviewing ? (
+              <ReviewSurface
+                title={
+                  reviewing.taskId
+                    ? `What ${reviewing.taskId} changed`
+                    : 'Everything this run would add'
+                }
+                subtitle={
+                  reviewing.taskId
+                    ? 'From this task\u2019s own starting commit, so it excludes whatever its dependencies produced.'
+                    : 'From the commit the run started at to the candidate.'
+                }
+                load={() =>
+                  reviewing.taskId
+                    ? api.taskDiff(reviewing.runId, reviewing.taskId)
+                    : api.candidateDiff(reviewing.runId)
+                }
+                onClose={() => setReviewing(null)}
+              />
+            ) : activeRun ? (
               <RunView
                 run={activeRun}
                 onBack={() => setActiveRunId(null)}
+                onReview={(taskId) => setReviewing({ runId: activeRun.id, taskId })}
                 onOpenTranscript={
                   // Only offered when the worker's session is still around. The link is resolved
                   // here rather than inside the run view because this is where the session list is,

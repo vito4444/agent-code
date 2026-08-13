@@ -171,6 +171,18 @@ impl RunEngine {
         Ok(())
     }
 
+    /// Where a task's branch points now.
+    ///
+    /// Read from the ref rather than from an event, so it answers for a task that is still working as
+    /// well as for one that finished. The branch name is derived the same way `prepare_workspace`
+    /// derives it, which is the one place that decides it.
+    pub async fn task_tip(&self, run_id: &str, task_id: &str) -> Result<String> {
+        let (_, project_root) = self.run_row(run_id).await?;
+        let branch = format!("wkbd/{}/{}", &run_id[..run_id.len().min(8)], task_id);
+        wkbd_vcs::resolve(std::path::Path::new(&project_root), &branch)
+            .with_context(|| format!("resolving {branch}"))
+    }
+
     pub fn is_cancelled(&self, run_id: &str) -> bool {
         self.cancelled
             .lock()
