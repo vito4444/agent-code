@@ -84,8 +84,20 @@ export function SessionList({
       });
       byGroup.set(key, entry);
     }
-    // Insertion order, which is the order the daemon returned them in — creation order. Sorting
-    // alphabetically would move a group under the reader's cursor whenever a new one appeared.
+    // Groups stay in insertion order, which is the order the daemon returned them in — creation
+    // order. Sorting groups alphabetically would move one under the reader's cursor whenever a new
+    // one appeared.
+    //
+    // A run's rows are sorted, which is the opposite decision for a different case. Workers inside
+    // a wave are dispatched in parallel, so their creation order is a race: the same plan produced
+    // `docs, feature-a, base-module` here and could produce any other order next time, while the
+    // run view lists the same tasks by wave. Two orderings of one list in one interface, neither of
+    // them predictable. This is the navigator, so it gets the predictable one.
+    for (const entry of byGroup.values()) {
+      if (entry.rows.every((r) => r.mono)) {
+        entry.rows.sort((a, b) => a.primary.localeCompare(b.primary));
+      }
+    }
     return [...byGroup.entries()];
   }, [sessions, filter]);
 

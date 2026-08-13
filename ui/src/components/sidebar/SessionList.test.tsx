@@ -136,3 +136,36 @@ describe('the session list', () => {
     expect(onNew).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * A run's workers are dispatched in parallel, so the order they were created in is a race.
+ *
+ * The run view lists the same tasks by wave, so leaving these in creation order gave one interface
+ * two orderings of one list and neither of them predictable — the same plan produced a different
+ * sidebar on every run. Groups still appear in creation order: sorting those would move one under
+ * the reader's cursor whenever a new one arrived.
+ */
+describe('the order a run’s workers appear in', () => {
+  it('is the task name, not whichever was dispatched first', () => {
+    const run = 'abcdef12-0000-0000-0000-000000000000';
+    render(
+      <SessionList
+        sessions={['docs', 'feature-a', 'base-module'].map((task) =>
+          session({
+            id: task,
+            agent_display_name: 'Worker',
+            project_root: `/state/worktrees/${run}/${task}`,
+          }),
+        )}
+        agents={[]}
+        activeId={null}
+        onSelect={() => {}}
+        onNew={() => {}}
+      />,
+    );
+
+    const group = screen.getByTestId(`group-run:${run}`);
+    const names = [...group.querySelectorAll('.session-agent')].map((n) => n.textContent);
+    expect(names).toEqual(['base-module', 'docs', 'feature-a']);
+  });
+});
