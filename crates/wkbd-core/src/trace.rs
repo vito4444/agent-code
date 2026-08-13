@@ -325,9 +325,64 @@ fn goal_kind(declared_paths: &[String]) -> String {
     exts.into_iter().collect::<Vec<_>>().join("+")
 }
 
+/// Names a distilled procedure after the kind of work it is for.
+///
+/// The default namer in `wkbd-evolve` cannot do better than repeat the class string, because only
+/// this module knows the class is a set of file extensions. It matters more than naming usually
+/// does: an approved workflow lands in the playbook as `Workflow "<name>": step -> step`, and the
+/// playbook is injected into every session. The name is therefore read by an agent deciding
+/// whether the procedure applies to what it has been asked to do, and `rs via write *.rs (1
+/// steps)` does not help it decide anything.
+pub struct ClassNamer;
+
+impl wkbd_evolve::distill::StepNamer for ClassNamer {
+    fn name(&self, draft: &wkbd_evolve::distill::WorkflowDraft) -> String {
+        if draft.goal_kind == "unclassified" {
+            return "work with no declared file types".to_string();
+        }
+        let exts: Vec<String> = draft.goal_kind.split('+').map(|e| format!(".{e}")).collect();
+        format!("changes to {}", join_words(&exts))
+    }
+}
+
+/// `a`, `a and b`, `a, b and c` — an English list rather than a delimiter, because this ends up
+/// inside a sentence that an agent reads.
+fn join_words(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wkbd_evolve::distill::{StepNamer, WorkflowDraft};
+
+    fn draft(goal_kind: &str) -> WorkflowDraft {
+        WorkflowDraft {
+            scope: "/repo".into(),
+            goal_kind: goal_kind.into(),
+            steps: vec!["write *.rs".into(), "execute cargo".into()],
+            supporting_runs: vec![],
+            verified_signals: vec![],
+        }
+    }
+
+    #[test]
+    fn a_procedure_is_named_for_the_work_it_applies_to() {
+        assert_eq!(ClassNamer.name(&draft("rs")), "changes to .rs");
+        assert_eq!(ClassNamer.name(&draft("md+rs")), "changes to .md and .rs");
+        assert_eq!(
+            ClassNamer.name(&draft("json+rs+toml")),
+            "changes to .json, .rs and .toml"
+        );
+        assert_eq!(
+            ClassNamer.name(&draft("unclassified")),
+            "work with no declared file types"
+        );
+    }
 
     #[test]
     fn a_command_becomes_its_program() {

@@ -702,7 +702,7 @@ DREPO="$WORK/distrepo"
 mkdir -p "$DREPO/src" "$DREPO/tests"
 cat > "$DREPO/tests/check.sh" <<'CHECK'
 #!/bin/sh
-[ -f src/mod.rs ] && echo "test unit::x ... ok"
+[ -f src/mod.rs ] && [ -f NOTES.md ] && echo "test unit::x ... ok"
 echo "test result: ok. done"
 CHECK
 (
@@ -714,10 +714,13 @@ CHECK
 # rather than a stub: a planner that silently repeated itself would hide a run that asked twice.
 python3 - "$WORK/distplan.json" <<'DISTPLAN'
 import json, sys
+# Two files of different kinds, so the task is two steps. One step is a fact about a task
+# rather than a procedure, and the distiller refuses it -- writing `Workflow "...": write *.rs`
+# into every future prelude teaches an agent nothing it does not already know.
 plan = {"goal": "one small change", "tasks": [{
-    "id": "only", "title": "write a module",
-    "body": "WRITE src/mod.rs <<<pub fn f() {}\n>>>",
-    "declared_paths": ["src/mod.rs"], "depends_on": [],
+    "id": "only", "title": "write a module and note it",
+    "body": "WRITE src/mod.rs <<<pub fn f() {}\n>>>\nWRITE NOTES.md <<<added f\n>>>",
+    "declared_paths": ["src/mod.rs", "NOTES.md"], "depends_on": [],
     "verify": {"cmd": "sh tests/check.sh", "must_pass": ["unit::x"],
                "immutable_paths": ["tests/**"]}}]}
 open(sys.argv[1], "w").write(json.dumps([plan] * 4))
@@ -774,8 +777,17 @@ check "it cites all three runs" "3" \
 check "the evidence is the acceptance command, not a claim" "true" \
     "$(echo "$DREVIEW" | jq -r '[.evidence.verified_signals[]|select(test("check.sh"))]|length >= 3')"
 # The step it recorded is the one the worker actually took, through the client's file methods.
-check "the procedure names what the worker did" "true" \
-    "$(echo "$DREVIEW" | jq -r '.body_for_human|test("write \\*.rs")')"
+# `changes` is what a reviewer reads; `body_for_human` is the exact bytes that will be stored.
+# Both are checked, because a queue that renders one thing and stores another is the whole
+# reason the approval binds to a hash.
+check "the procedure records both steps, in order" "true" \
+    "$(echo "$DREVIEW" | jq -r '[.changes[]|select(test("^1\\. write \\*\\.rs$"))]|length == 1')"
+check "and the second one after it" "true" \
+    "$(echo "$DREVIEW" | jq -r '[.changes[]|select(test("^2\\. write \\*\\.md$"))]|length == 1')"
+# The name is read by an agent deciding whether the procedure applies, since an approved
+# workflow is injected into every session from then on.
+check "it is named for the work it applies to" "true" \
+    "$(echo "$DREVIEW" | jq -r '.body_for_human|test("changes to .md and .rs")')"
 
 # Running again must not queue it a second time. A queue that regrows after every run stops
 # being read, and this is the loop most able to regrow it.

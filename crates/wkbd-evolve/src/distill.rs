@@ -125,6 +125,14 @@ impl RunSummary {
 #[derive(Debug, Clone)]
 pub struct DistillPolicy {
     pub min_occurrences: usize,
+    /// Below this, a procedure is not one.
+    ///
+    /// A single step is a fact about a task, not a sequence worth remembering, and it lands in
+    /// the playbook as a bullet reading `Workflow "...": edit *.rs` — which says nothing an agent
+    /// about to edit a Rust file does not already know. The playbook is injected into every
+    /// session, so a bullet that teaches nothing is not free: it is a line of the prelude spent
+    /// making the rest of it less prominent.
+    pub min_steps: usize,
     /// Procedures longer than this are not distilled. A twenty-step recipe is a
     /// description of one run rather than a reusable one, and it will be wrong by the time
     /// it is read.
@@ -135,6 +143,7 @@ impl Default for DistillPolicy {
     fn default() -> Self {
         DistillPolicy {
             min_occurrences: DEFAULT_MIN_OCCURRENCES,
+            min_steps: 2,
             max_steps: 8,
         }
     }
@@ -195,7 +204,7 @@ pub fn distill_with(
     // produce the same proposals in the same sequence.
     let mut groups: BTreeMap<String, Vec<&RunSummary>> = BTreeMap::new();
     for run in runs {
-        if run.steps.is_empty() || run.steps.len() > policy.max_steps {
+        if run.steps.len() < policy.min_steps.max(1) || run.steps.len() > policy.max_steps {
             continue;
         }
         groups.entry(run.signature()).or_default().push(run);
@@ -320,6 +329,34 @@ mod tests {
                 command: "cargo test -p wkbd-store".into(),
             }],
         )
+    }
+
+    /// One step is a fact about a task, not a procedure, and it costs a line of every future
+    /// prelude to say so.
+    #[test]
+    fn a_single_step_is_not_a_procedure() {
+        let policy = DistillPolicy::default();
+        assert_eq!(policy.min_steps, 2);
+
+        let single: Vec<RunSummary> = ["run-1", "run-2", "run-3"]
+            .iter()
+            .map(|id| {
+                let mut r = verified(id);
+                r.steps = vec!["edit *.rs".into()];
+                r
+            })
+            .collect();
+        assert!(distill(&single, &policy).is_empty());
+
+        let pair: Vec<RunSummary> = ["run-1", "run-2", "run-3"]
+            .iter()
+            .map(|id| {
+                let mut r = verified(id);
+                r.steps = vec!["edit *.rs".into(), "execute cargo".into()];
+                r
+            })
+            .collect();
+        assert_eq!(distill(&pair, &policy).len(), 1);
     }
 
     /// The gate counts occasions, and a run is the occasion.

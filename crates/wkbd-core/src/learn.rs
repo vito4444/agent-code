@@ -53,7 +53,11 @@ pub async fn from_run(store: &Store, run_id: &str, project_root: &str) {
 /// second finding returns the first row instead of growing the queue.
 async fn distil_procedures(store: &Store, project_root: &str) -> Result<()> {
     let traces = crate::trace::traces_for_project(store, project_root).await?;
-    let candidates = wkbd_evolve::distill::distill(&traces, &DistillPolicy::default());
+    let candidates = wkbd_evolve::distill::distill_with(
+        &traces,
+        &DistillPolicy::default(),
+        &crate::trace::ClassNamer,
+    );
     if candidates.is_empty() {
         // Logged rather than returned early and silently, and the trace count is in it. Nothing
         // to distil and nothing to distil *from* look identical from outside, and the second is
