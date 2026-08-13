@@ -240,15 +240,23 @@ sleep 2
 raise
 shot mention-picker
 
-# Clear it and send a real one, so the transcript shows what the agent was given.
+# Clear the box, then send the real one into a session of its own.
+#
+# Its own session because the strip belongs to the prompt that attached the files, and in a
+# transcript that already scrolls, the prompt is off the top by the time the answer arrives. One
+# turn fits, which is what makes the capture show the thing it is a capture of.
 DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers ctrl+a
 DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers BackSpace
-api /api/sessions/"$S1"/prompt -X POST -H 'content-type: application/json' \
-    -d '{"text":"explain this normalizer","mentions":["crates/wkbd-proto/src/normalize.rs"]}' > /dev/null
+S1B=$(api /api/sessions -X POST -H 'content-type: application/json' \
+    -d "{\"agent_id\":\"rich\",\"project_root\":\"$ROOT\"}" | jq -r .id)
+api /api/sessions/"$S1B"/prompt -X POST -H 'content-type: application/json' \
+    -d '{"text":"compare these two and tell me which one owns the invariant",
+         "mentions":["crates/wkbd-proto/src/normalize.rs","docs/UI-SPEC.md"]}' > /dev/null
 sleep 4
 REQ=$(python3 "$ROOT/scripts/read-events.py" "$PORT" 0 1.5 2> /dev/null \
-    | jq -r '[.[]|select(.payload.event=="permission_requested")]|last|.payload.request_id // "1"')
-api /api/sessions/"$S1"/permission -X POST -H 'content-type: application/json' \
+    | jq -r --arg s "$S1B" \
+      '[.[]|select(.session_id==$s and .payload.event=="permission_requested")]|last|.payload.request_id // "1"')
+api /api/sessions/"$S1B"/permission -X POST -H 'content-type: application/json' \
     -d "{\"request_id\":\"$REQ\",\"option_id\":\"allow-once\"}" > /dev/null
 sleep 6
 raise

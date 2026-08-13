@@ -118,6 +118,8 @@ struct Session {
     /// The working directory the client gave us at `session/new`. Scenarios substitute it for
     /// `{ROOT}` so they can name paths without knowing where the test put the repository.
     cwd: String,
+    /// Prompts answered so far, so a scenario can behave differently on a later turn.
+    turns: u64,
 }
 
 struct State {
@@ -244,7 +246,7 @@ async fn main() -> Result<()> {
                         .unwrap_or("/")
                         .to_string();
                     s.sessions
-                        .insert(sid.clone(), Session { profile, config, cancelled: false, cwd });
+                        .insert(sid.clone(), Session { profile, config, cancelled: false, cwd, turns: 0 });
                     (sid, profile.config_options())
                 };
                 if let Some(id) = id {
@@ -328,26 +330,30 @@ async fn main() -> Result<()> {
                     .map(|s| s.cwd.clone())
                     .unwrap_or_else(|| "/".to_string());
 
-                let (profile, delay, permission_wait) = {
+                let (profile, delay, permission_wait, turn) = {
                     let mut s = state.lock().unwrap();
+                    let mut turn = 1;
                     if let Some(sess) = s.sessions.get_mut(&sid) {
                         sess.cancelled = false;
+                        sess.turns += 1;
+                        turn = sess.turns;
                     }
                     let p = s
                         .sessions
                         .get(&sid)
                         .map(|x| x.profile)
                         .unwrap_or_else(|| s.cli.profile);
-                    (p, s.cli.delay_ms, s.cli.permission_wait_ms)
+                    (p, s.cli.delay_ms, s.cli.permission_wait_ms, turn)
                 };
 
                 let st = state.clone();
                 let sid2 = sid.clone();
                 ACTIVE_TURNS.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
-                    let stop =
-                        run_script(st, &sid2, profile, &prompt_text, delay, &cwd, permission_wait)
-                            .await;
+                    let stop = run_script(
+                        st, &sid2, profile, &prompt_text, delay, &cwd, permission_wait, turn,
+                    )
+                    .await;
                     if let Some(id) = id {
                         respond(&id, json!({ "stopReason": stop }));
                     }
@@ -384,8 +390,9 @@ async fn run_script(
     delay_ms: u64,
     cwd: &str,
     permission_wait_ms: u64,
+    turn: u64,
 ) -> &'static str {
-    let steps = profile.script(prompt);
+    let steps = profile.script(prompt, turn);
 
     for step in steps {
         if state

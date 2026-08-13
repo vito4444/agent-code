@@ -143,9 +143,13 @@ impl Profile {
         }
     }
 
-    pub fn script(self, prompt: &str) -> Vec<Step> {
+    /// `turn` is 1 for the first prompt in a session. Only the rich profile uses it, to make
+    /// its reported usage grow the way a real context window does — a fixed figure per turn
+    /// makes every difference across a turn zero, which is indistinguishable from an agent
+    /// that reports nothing.
+    pub fn script(self, prompt: &str, turn: u64) -> Vec<Step> {
         match self {
-            Profile::Rich => rich(prompt),
+            Profile::Rich => rich(prompt, turn),
             Profile::Spartan => spartan(prompt),
             Profile::Resume => resume(),
             Profile::Stall => stall(),
@@ -315,7 +319,7 @@ fn usage(used: u64, size: u64) -> Value {
 
 /// The scenario the whole layered-chat design exists for: several thoughts in one turn,
 /// separated by tool calls, with the answer last.
-fn rich(prompt: &str) -> Vec<Step> {
+fn rich(prompt: &str, turn: u64) -> Vec<Step> {
     vec![
         Step::Emit(json!({
             "sessionUpdate": "plan",
@@ -326,7 +330,7 @@ fn rich(prompt: &str) -> Vec<Step> {
         })),
         Step::Emit(thought(Some("m1"), "The prompt mentions ")),
         Step::Emit(thought(Some("m1"), "config loading, so I should start at the loader.")),
-        Step::Emit(usage(12_000, 200_000)),
+        Step::Emit(usage(12_000 + (turn - 1) * 41_000, 200_000)),
         Step::Emit(tool_call("t1", "Read src/config.rs", "read", "in_progress")),
         Step::Emit(json!({
             "sessionUpdate": "tool_call_update",
@@ -374,7 +378,7 @@ fn rich(prompt: &str) -> Vec<Step> {
             Some("pub fn load() -> Config {\n    parse(read_file(PATH))\n}"),
             "static CACHE: OnceLock<Config> = OnceLock::new();\n\npub fn load() -> &'static Config {\n    CACHE.get_or_init(|| parse(read_file(PATH)))\n}",
         )),
-        Step::Emit(usage(53_000, 200_000)),
+        Step::Emit(usage(53_000 + (turn - 1) * 41_000, 200_000)),
         Step::Emit(message(Some("m4"), "The loader parsed the file on every call. ")),
         Step::Emit(message(Some("m4"), &format!("I cached it behind a OnceLock. (prompt was: {prompt})"))),
     ]
