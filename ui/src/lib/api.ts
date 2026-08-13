@@ -10,7 +10,7 @@
 import type { Rule } from '../components/rules/RulesScreen';
 import type { AgentSummary, RunSummary, SessionSummary } from './types';
 
-export type { AgentSummary };
+export type { AgentSummary, SessionSummary };
 
 const base = '/api';
 

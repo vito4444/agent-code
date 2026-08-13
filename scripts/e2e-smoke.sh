@@ -277,6 +277,59 @@ kill "$DAEMON2_PID" 2>/dev/null || true
 wait "$DAEMON2_PID" 2>/dev/null || true
 rm -rf "$STATE2"
 
+# ------------------------------------------------- a question nobody answered
+#
+# The agent asks for permission, gives up, and finishes its turn while the question is still on
+# screen. Real agents have their own timeouts and none of them is the client's, so a client that
+# assumes somebody is still waiting behind a prompt is assuming something it was never told.
+#
+# What used to happen: the waiter stayed registered for ten minutes after the turn ended. For those
+# ten minutes the interface offered buttons that did nothing, and the daemon accepted an answer for a
+# conversation that was over — writing into the log a decision that influenced nothing, which a later
+# reader cannot tell apart from one that did.
+echo
+echo "checking a permission request nobody answered"
+PERM_STATE=$(mktemp -d)
+PORT5=$((PORT + 4))
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$PERM_STATE" --listen "127.0.0.1:$PORT5" \
+    --agent "asks=Asks=$ROOT/target/debug/fake-acp-agent --profile rich --permission-wait-ms 0" \
+    > "$PERM_STATE/daemon.log" 2>&1 &
+DAEMON6_PID=$!
+for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$PORT5/api/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
+PSID=$(curl -sf -X POST "http://127.0.0.1:$PORT5/api/sessions" \
+    -H 'content-type: application/json' \
+    -d "{\"agent_id\":\"asks\",\"project_root\":\"$ROOT\"}" | jq -r '.id // empty')
+curl -sf -X POST "http://127.0.0.1:$PORT5/api/sessions/$PSID/prompt" \
+    -H 'content-type: application/json' -d '{"text":"edit something"}' > /dev/null 2>&1
+for _ in $(seq 1 60); do
+    python3 "$ROOT/scripts/read-events.py" "$PORT5" 0 1.0 > "$PERM_STATE/events.json" 2>/dev/null \
+        || echo '[]' > "$PERM_STATE/events.json"
+    [ "$(jq -r '[.[]|select(.payload.event=="turn_ended")]|length' "$PERM_STATE/events.json")" != "0" ] && break
+    sleep 0.25
+done
+PE="$PERM_STATE/events.json"
+
+check "the request was recorded" "true" \
+    "$(jq -r '[.[]|select(.payload.event=="permission_requested")]|length >= 1' "$PE")"
+check "it expired when the turn ended rather than staying open" "true" \
+    "$(jq -r '[.[]|select(.payload.event=="permission_expired")]|length >= 1' "$PE")"
+# The distinction that keeps the log readable: nobody refused, the agent stopped waiting. Recording
+# the lapse as a refusal would put a choice in the log that no person made.
+check "the lapse was not recorded as a decision" "0" \
+    "$(jq -r '[.[]|select(.payload.event=="permission_resolved")]|length' "$PE")"
+LATE=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PORT5/api/sessions/$PSID/permission" \
+    -H 'content-type: application/json' -d '{"request_id":"1","option_id":"allow-once"}')
+check "answering after the turn ended is refused" "409" "$LATE"
+
+kill "$DAEMON6_PID" 2>/dev/null || true
+wait "$DAEMON6_PID" 2>/dev/null || true
+rm -rf "$PERM_STATE"
+
 # --------------------------------------------------------- process cleanup
 #
 # Three layers, and only the third covers a hard crash. It reads a registry, so something has to

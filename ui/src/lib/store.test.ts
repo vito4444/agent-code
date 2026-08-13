@@ -509,3 +509,43 @@ describe('files the client touched, folded into a turn', () => {
     expect(state.turns).toHaveLength(0);
   });
 });
+
+describe('a permission nobody answered', () => {
+  function turnWithPermission(extra: EventPayload[] = []) {
+    let state = emptySession();
+    state = applyOne(state, { event: 'turn_started', turn: 1, prompt: 'go' });
+    state = applyOne(state, {
+      event: 'permission_requested',
+      request_id: 'p1',
+      tool_call_id: 't1',
+      title: 'Edit src/a.rs',
+      options: [{ option_id: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
+    });
+    for (const e of extra) state = applyOne(state, e);
+    return state.turns[0];
+  }
+
+  it('is open while nothing has happened to it', () => {
+    const item = turnWithPermission().items.find((i) => i.type === 'permission');
+    expect(item).toMatchObject({ resolved_with: null, expired: false });
+  });
+
+  /**
+   * Distinct from a refusal. Nobody refused; the agent stopped waiting. Recording the lapse as a
+   * decision would put a choice in the log that no person made, which a later reader has no way to
+   * question.
+   */
+  it('is marked expired rather than refused when the turn ends first', () => {
+    const item = turnWithPermission([
+      { event: 'permission_expired', request_id: 'p1' },
+    ]).items.find((i) => i.type === 'permission');
+    expect(item).toMatchObject({ resolved_with: null, expired: true });
+  });
+
+  it('does not touch a different request', () => {
+    const item = turnWithPermission([
+      { event: 'permission_expired', request_id: 'somebody-else' },
+    ]).items.find((i) => i.type === 'permission');
+    expect(item).toMatchObject({ expired: false });
+  });
+});

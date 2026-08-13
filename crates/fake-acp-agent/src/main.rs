@@ -34,6 +34,15 @@ struct Cli {
     #[arg(long, default_value_t = 0, env = "FAKE_ACP_DELAY_MS")]
     delay_ms: u64,
 
+    /// How long to wait for an answer to a permission request before carrying on regardless.
+    ///
+    /// Zero models the case worth testing: an agent that asked, gave up, and finished its turn while
+    /// the question was still on screen. Real agents have their own timeouts and none of them is the
+    /// client's, so a client that assumes somebody is still waiting behind that prompt is assuming
+    /// something it was never told.
+    #[arg(long, default_value_t = 30_000, env = "FAKE_ACP_PERMISSION_WAIT_MS")]
+    permission_wait_ms: u64,
+
     /// Reported model. Read once at startup, exactly like a real CLI reading argv or env.
     #[arg(long, default_value = "fake-fast", env = "FAKE_ACP_MODEL")]
     model: String,
@@ -287,7 +296,7 @@ async fn main() -> Result<()> {
                     .map(|s| s.cwd.clone())
                     .unwrap_or_else(|| "/".to_string());
 
-                let (profile, delay) = {
+                let (profile, delay, permission_wait) = {
                     let mut s = state.lock().unwrap();
                     if let Some(sess) = s.sessions.get_mut(&sid) {
                         sess.cancelled = false;
@@ -297,14 +306,16 @@ async fn main() -> Result<()> {
                         .get(&sid)
                         .map(|x| x.profile)
                         .unwrap_or_else(|| s.cli.profile);
-                    (p, s.cli.delay_ms)
+                    (p, s.cli.delay_ms, s.cli.permission_wait_ms)
                 };
 
                 let st = state.clone();
                 let sid2 = sid.clone();
                 ACTIVE_TURNS.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
-                    let stop = run_script(st, &sid2, profile, &prompt_text, delay, &cwd).await;
+                    let stop =
+                        run_script(st, &sid2, profile, &prompt_text, delay, &cwd, permission_wait)
+                            .await;
                     if let Some(id) = id {
                         respond(&id, json!({ "stopReason": stop }));
                     }
@@ -340,6 +351,7 @@ async fn run_script(
     prompt: &str,
     delay_ms: u64,
     cwd: &str,
+    permission_wait_ms: u64,
 ) -> &'static str {
     let steps = profile.script(prompt);
 
@@ -384,7 +396,8 @@ async fn run_script(
                 }));
                 // Wait for the client to answer, but not forever: a client that never
                 // answers must not wedge the double.
-                for _ in 0..600 {
+                let rounds = permission_wait_ms.div_ceil(50);
+                for _ in 0..rounds {
                     {
                         let s = state.lock().unwrap();
                         if !s.pending.contains(&req_id) {

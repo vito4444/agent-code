@@ -2083,3 +2083,39 @@
   color: var(--fg-accent);
   cursor: pointer;
 }
+
+/* A request nobody answered before the turn ended.
+   Drained of the attention colour: an unanswered question is over, and keeping it loud puts a
+   standing alarm in the transcript for something that can no longer be acted on. */
+.permission[data-expired='true'] {
+  background: var(--bg-muted);
+  border-color: var(--border-muted);
+  color: var(--fg-subtle);
+}
+
+.permission[data-expired='true'] .permission-title,
+.permission[data-expired='true'] .permission-icon {
+  color: var(--fg-subtle);
+}
+
+/* A task id, which is an identifier rather than a name. */
+.session-agent.mono {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+}
+
+/* The way from a task to what its worker actually did.
+   A quiet link rather than a button: the card's decisions are the merge gate's, and this is
+   navigation. */
+.task-transcript {
+  margin-top: var(--space-8);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

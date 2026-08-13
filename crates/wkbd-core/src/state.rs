@@ -251,8 +251,14 @@ impl AppState {
         rx
     }
 
-    pub async fn clear_permission_wait(&self, request_id: &str) {
-        self.pending_permissions.lock().await.remove(request_id);
+    /// Drops a waiter. Reports whether one was there, so a caller ending a turn can tell an
+    /// unanswered request apart from one that was answered a moment ago.
+    pub async fn clear_permission_wait(&self, request_id: &str) -> bool {
+        self.pending_permissions
+            .lock()
+            .await
+            .remove(request_id)
+            .is_some()
     }
 
     /// Delivers an answer. Returns false when nothing was waiting, which happens when the

@@ -325,3 +325,29 @@ describe('the run list', () => {
     expect(typeof seeded.created_ms).toBe('number');
   });
 });
+
+describe('reaching what a task actually did', () => {
+  /**
+   * The gap this closes. A card could say a task passed and give no way to see what it did — the
+   * files it wrote, the commands it ran, what it was refused — while the transcript was on disk and
+   * already in the sidebar, one click away and unreachable from here.
+   */
+  it('offers the worker transcript, and names the task it belongs to', async () => {
+    const user = userEvent.setup();
+    const opened: string[] = [];
+    render(
+      <RunView
+        run={fold([started, planned])}
+        onOpenTranscript={(taskId) => opened.push(taskId)}
+      />,
+    );
+    await user.click(screen.getByTestId('task-a-transcript'));
+    expect(opened).toEqual(['a']);
+  });
+
+  /** A link that leads nowhere is worse than no link: it says the record is there, then proves it is not. */
+  it('offers nothing when the session is gone', () => {
+    render(<RunView run={fold([started, planned])} />);
+    expect(screen.queryByTestId('task-a-transcript')).toBeNull();
+  });
+});

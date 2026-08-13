@@ -37,6 +37,12 @@ pub enum TurnItem {
         options: Vec<PermissionOption>,
         resolved_with: Option<String>,
         auto: bool,
+        /// The turn ended before anybody answered.
+        ///
+        /// Separate from `resolved_with: None`, which means the request is still open. An expired
+        /// request must not keep offering buttons: the agent has stopped waiting, so pressing one
+        /// posts a decision into a conversation that has already moved on.
+        expired: bool,
     },
     Error {
         message: String,
@@ -270,6 +276,7 @@ impl ViewBuilder {
                         options: options.clone(),
                         resolved_with: None,
                         auto: false,
+                        expired: false,
                     });
                     self.perm_index.insert(request_id.clone(), (ti, turn.items.len() - 1));
                 }
@@ -281,6 +288,15 @@ impl ViewBuilder {
                     {
                         *resolved_with = option_id.clone();
                         *auto = *is_auto;
+                    }
+                }
+            }
+            EventPayload::PermissionExpired { request_id } => {
+                if let Some(&(t, i)) = self.perm_index.get(request_id) {
+                    if let Some(TurnItem::Permission { expired, .. }) =
+                        self.turns.get_mut(t).and_then(|tv| tv.items.get_mut(i))
+                    {
+                        *expired = true;
                     }
                 }
             }

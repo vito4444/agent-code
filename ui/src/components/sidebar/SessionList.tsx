@@ -13,7 +13,35 @@ import type { AgentSummary, SessionSummary } from '../../lib/types';
  * The filter is over both the project path and the agent name, and it is present at three sessions
  * rather than at thirty. A search box that appears once a list is long is a search box nobody has a
  * habit of using, and the moment it would help most is the moment it is newest.
+ *
+ * Orchestrated workers are grouped by their run rather than by their directory. Grouping them by
+ * directory is technically what they are — each has its own worktree — and it produces one group per
+ * worker, each headed by a path ending in a run's uuid, which is three headings of noise around one
+ * row each. What a reader wants there is the run and the task, and both are already in the path.
  */
+interface Row {
+  session: SessionSummary;
+  primary: string;
+  secondary: string | null;
+  mono: boolean;
+}
+
+/**
+ * Recognises a worker's worktree, which the orchestrator creates at
+ * `<state>/worktrees/<run id>/<task id>`.
+ *
+ * Matched on the two path segments after `worktrees` rather than on the whole prefix, because the
+ * state directory is configurable and hard-coding where it usually is would make this quietly stop
+ * working for anyone who moved it — and the symptom would be a sidebar full of uuids, which is what
+ * this exists to prevent.
+ */
+export function asWorker(projectRoot: string): { runId: string; task: string } | null {
+  const parts = projectRoot.split('/').filter(Boolean);
+  const at = parts.lastIndexOf('worktrees');
+  if (at === -1 || parts.length < at + 3) return null;
+  return { runId: parts[at + 1], task: parts[at + 2] };
+}
+
 export function SessionList({
   sessions,
   agents,
@@ -40,15 +68,25 @@ export function SessionList({
         )
       : sessions;
 
-    const byProject = new Map<string, SessionSummary[]>();
+    const byGroup = new Map<string, { label: string; rows: Row[] }>();
     for (const s of kept) {
-      const list = byProject.get(s.project_root) ?? [];
-      list.push(s);
-      byProject.set(s.project_root, list);
+      const worker = asWorker(s.project_root);
+      const key = worker ? `run:${worker.runId}` : s.project_root;
+      const label = worker ? `Run ${worker.runId.slice(0, 8)}` : s.project_root;
+      const entry = byGroup.get(key) ?? { label, rows: [] };
+      entry.rows.push({
+        session: s,
+        // The task, for a worker. Otherwise the agent, which is what distinguishes two sessions in
+        // the same directory.
+        primary: worker ? worker.task : s.agent_display_name,
+        secondary: worker ? s.agent_display_name : s.title,
+        mono: worker !== null,
+      });
+      byGroup.set(key, entry);
     }
     // Insertion order, which is the order the daemon returned them in — creation order. Sorting
-    // alphabetically would move a project under the reader's cursor whenever a new one appeared.
-    return [...byProject.entries()];
+    // alphabetically would move a group under the reader's cursor whenever a new one appeared.
+    return [...byGroup.entries()];
   }, [sessions, filter]);
 
   return (
@@ -93,24 +131,26 @@ export function SessionList({
         </p>
       )}
 
-      {groups.map(([project, list]) => (
-        <section className="sidebar-group" key={project} data-testid={`group-${project}`}>
-          {/* The project is the heading rather than a line under every row, so a project with four
-              sessions states its path once. Truncated from the left because the end of a path is what
-              distinguishes it. */}
-          <h2 className="sidebar-group-name" title={project}>
-            <bdi>{project}</bdi>
+      {groups.map(([key, group]) => (
+        <section className="sidebar-group" key={key} data-testid={`group-${key}`}>
+          {/* Stated once for the group rather than under every row. Truncated from the left, because
+              the end of a path is the part that tells two of them apart. */}
+          <h2 className="sidebar-group-name" title={group.label}>
+            <bdi>{group.label}</bdi>
           </h2>
           <ul className="sidebar-sessions">
-            {list.map((s) => (
-              <li key={s.id}>
+            {group.rows.map((row) => (
+              <li key={row.session.id}>
                 <button
                   type="button"
-                  data-active={s.id === activeId}
-                  onClick={() => onSelect(s.id)}
+                  data-active={row.session.id === activeId}
+                  onClick={() => onSelect(row.session.id)}
+                  title={row.session.project_root}
                 >
-                  <span className="session-agent">{s.agent_display_name}</span>
-                  {s.title && <span className="session-title">{s.title}</span>}
+                  <span className={row.mono ? 'session-agent mono' : 'session-agent'}>
+                    {row.primary}
+                  </span>
+                  {row.secondary && <span className="session-title">{row.secondary}</span>}
                 </button>
               </li>
             ))}

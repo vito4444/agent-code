@@ -110,3 +110,42 @@ describe('files the client touched for the agent', () => {
     expect(screen.getByTestId('file-refused-/w/x').textContent ?? '').toContain('some-new-kind');
   });
 });
+
+describe('a permission that expired', () => {
+  function permission(over: Partial<Extract<TurnItem, { type: 'permission' }>>): TurnItem {
+    return {
+      type: 'permission',
+      request_id: 'p1',
+      title: 'Edit src/a.rs',
+      options: [{ option_id: 'allow-once', name: 'Allow once', kind: 'allow_once' }],
+      resolved_with: null,
+      auto: false,
+      expired: false,
+      ...over,
+    };
+  }
+
+  it('offers buttons while the request is still open', () => {
+    render(<Turn turn={turn([permission({})])} />);
+    expect(screen.getByText('Allow once')).toBeTruthy();
+  });
+
+  /**
+   * The agent stopped waiting when the turn ended, so a button here posts a decision into a
+   * conversation that has already moved on — and the record then shows a choice that influenced
+   * nothing, indistinguishable from one that did.
+   */
+  it('offers none once the turn ended without an answer', () => {
+    render(<Turn turn={turn([permission({ expired: true })])} />);
+    expect(screen.queryByText('Allow once')).toBeNull();
+    expect(screen.getByTestId('permission-expired-p1').textContent ?? '').toMatch(
+      /not answered/i,
+    );
+  });
+
+  /** An answer that did land still shows the answer, expired or not. */
+  it('shows the decision when one was made', () => {
+    render(<Turn turn={turn([permission({ resolved_with: 'allow-once' })])} />);
+    expect(screen.getByTestId('permission-p1').textContent ?? '').toContain('Allow once');
+  });
+});

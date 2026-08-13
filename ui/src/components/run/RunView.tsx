@@ -17,7 +17,23 @@ import type { RunStatus, TaskStatus } from '../../lib/types';
  * library and would say less, because the only relationships that matter here are "these are
  * concurrent" and "this waits for that", and both are readable as position.
  */
-export function RunView({ run, onBack }: { run: RunState; onBack?: () => void }) {
+export function RunView({
+  run,
+  onBack,
+  onOpenTranscript,
+}: {
+  run: RunState;
+  onBack?: () => void;
+  /**
+   * Opens the conversation a task's worker had, when one is still around.
+   *
+   * The most useful thing missing from this screen was that a card could say a task passed and give
+   * no way to see what it did. The transcript is where the answer is — the files it wrote, the
+   * commands it ran, what it was refused — and it was already on disk and already in the sidebar,
+   * one click away and unreachable from here.
+   */
+  onOpenTranscript?: (taskId: string) => void;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const blocker = runBlocker(run);
@@ -120,7 +136,11 @@ export function RunView({ run, onBack }: { run: RunState; onBack?: () => void })
               {wave.map((taskId) => {
                 const task = taskById(run, taskId);
                 return task ? (
-                  <TaskCard key={taskId} task={task} />
+                  <TaskCard
+                    key={taskId}
+                    task={task}
+                    onOpenTranscript={onOpenTranscript}
+                  />
                 ) : (
                   <p className="task-missing" key={taskId} data-testid={`task-missing-${taskId}`}>
                     <code>{taskId}</code> is in the schedule but the plan carried no description
@@ -261,7 +281,13 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
  * the commitments next to the outcome is what makes an acceptance result readable as a
  * verdict rather than as a colour.
  */
-function TaskCard({ task }: { task: TaskState }) {
+function TaskCard({
+  task,
+  onOpenTranscript,
+}: {
+  task: TaskState;
+  onOpenTranscript?: (taskId: string) => void;
+}) {
   const { summary } = task;
 
   return (
@@ -364,6 +390,19 @@ function TaskCard({ task }: { task: TaskState }) {
 
       {task.verification && (
         <Verdict taskId={summary.id} verification={task.verification} />
+      )}
+
+      {onOpenTranscript && (
+        /* Only when a session for this task still exists. A link that leads nowhere is worse than no
+           link: it says the record is there and then proves it is not. */
+        <button
+          type="button"
+          className="task-transcript"
+          onClick={() => onOpenTranscript(summary.id)}
+          data-testid={`task-${summary.id}-transcript`}
+        >
+          Open the worker&rsquo;s transcript
+        </button>
       )}
     </article>
   );

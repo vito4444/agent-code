@@ -221,6 +221,13 @@ pub enum EventPayload {
         /// True when our own policy answered without asking the user.
         auto: bool,
     },
+    /// The turn ended while this request was still unanswered.
+    ///
+    /// Its own event rather than a resolution with no option, because "nobody answered and the agent
+    /// stopped waiting" and "somebody refused" are different things that happened, and only one of
+    /// them is a decision. Recording the lapse as a refusal would put a choice in the log that no
+    /// person made, which is exactly the kind of entry a later reader has no way to question.
+    PermissionExpired { request_id: String },
 
     ConfigOptionsChanged { options: Vec<ConfigOptionView> },
 

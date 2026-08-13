@@ -472,6 +472,7 @@ export function applyOne(state: SessionState, payload: EventPayload): SessionSta
             options: payload.options,
             resolved_with: null,
             auto: false,
+            expired: false,
           },
         ],
       };
@@ -484,6 +485,21 @@ export function applyOne(state: SessionState, payload: EventPayload): SessionSta
         items: t.items.map((i) =>
           i.type === 'permission' && i.request_id === payload.request_id
             ? { ...i, resolved_with: payload.option_id, auto: payload.auto }
+            : i,
+        ),
+      }));
+      return { ...state, turns };
+    }
+
+    // The turn ended with nobody having answered. Marked rather than dropped: a request that was
+    // asked and never answered is part of what happened, and the buttons have to stop being offered
+    // because the agent is no longer waiting behind them.
+    case 'permission_expired': {
+      const turns = state.turns.map((t) => ({
+        ...t,
+        items: t.items.map((i) =>
+          i.type === 'permission' && i.request_id === payload.request_id
+            ? { ...i, expired: true }
             : i,
         ),
       }));

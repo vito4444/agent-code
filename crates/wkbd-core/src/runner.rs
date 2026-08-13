@@ -53,8 +53,12 @@ pub struct TurnContext {
 pub trait AskUser: Send + Sync {
     /// Records that an answer is expected, and returns something to await it on.
     async fn register(&self, request_id: &str) -> PermissionWaiter;
-    /// Withdraws a registration, for when a remembered decision means nobody needs to be asked.
-    async fn cancel(&self, request_id: &str);
+    /// Withdraws a registration, for when a remembered decision means nobody needs to be asked, or
+    /// when the turn ended with the request still open.
+    ///
+    /// Reports whether there was anything to withdraw. The caller uses that to tell "nobody answered"
+    /// apart from "somebody answered just now", and only the first is worth recording.
+    async fn cancel(&self, request_id: &str) -> bool;
 }
 
 /// Awaits a permission answer. `None` means refuse.
@@ -72,9 +76,26 @@ impl PermissionWaiter {
     }
 }
 
+/// How a wait for a human ended.
+///
+/// Three outcomes, not two, and the third is the reason this is an enum. Collapsing "the
+/// registration was withdrawn" into "the answer was no" writes a refusal into the log that nobody
+/// made — and a reader cannot tell it apart from a refusal somebody meant.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Answered {
+    /// Somebody picked an option.
+    With(String),
+    /// Somebody declined, or the wait timed out with nobody there. Both are decisions in the sense
+    /// that matters: the operation does not happen, and that outcome is what was intended.
+    Refused,
+    /// The registration was withdrawn — the turn ended while the question was still on screen. The
+    /// agent still needs a reply, but nothing here is a decision anyone made.
+    Withdrawn,
+}
+
 impl std::future::IntoFuture for PermissionWaiter {
-    type Output = Option<String>;
-    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>>;
+    type Output = Answered;
+    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Answered> + Send>>;
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move {
@@ -82,8 +103,11 @@ impl std::future::IntoFuture for PermissionWaiter {
             // an approving one, and the agent gets a definite answer either way instead of
             // blocking on a human who is not there.
             match tokio::time::timeout(self.timeout, self.rx).await {
-                Ok(Ok(answer)) => answer,
-                _ => None,
+                Ok(Ok(Some(option))) => Answered::With(option),
+                Ok(Ok(None)) => Answered::Refused,
+                // The sender was dropped, which only happens when the registration is withdrawn.
+                Ok(Err(_)) => Answered::Withdrawn,
+                Err(_) => Answered::Refused,
             }
         })
     }
@@ -97,6 +121,9 @@ pub async fn run_turn(
     prompt: &str,
     rx: &mut mpsc::UnboundedReceiver<Incoming>,
 ) -> Result<StopReason> {
+    // Every permission this turn opened, so the ones still open at the end can be closed out.
+    let mut opened_permissions: Vec<String> = Vec::new();
+
     let emit = |payloads: Vec<EventPayload>| {
         let store = ctx.store.clone();
         let sid = ctx.session_local_id.clone();
@@ -181,7 +208,9 @@ pub async fn run_turn(
                     break;
                 };
                 highest_processed = highest_processed.max(msg.read_seq());
-                emit(handle_incoming(ctx, msg).await).await;
+                let produced = handle_incoming(ctx, msg).await;
+                note_permission_requests(&produced, &mut opened_permissions);
+                emit(produced).await;
             }
         }
     }
@@ -216,7 +245,9 @@ pub async fn run_turn(
         // ours is already queued and this drain cannot block.
         while let Ok(msg) = rx.try_recv() {
             highest_processed = highest_processed.max(msg.read_seq());
-            emit(handle_incoming(ctx, msg).await).await;
+            let produced = handle_incoming(ctx, msg).await;
+            note_permission_requests(&produced, &mut opened_permissions);
+            emit(produced).await;
         }
         let deadline = tokio::time::Instant::now();
         while highest_processed < target && !agent_gone {
@@ -235,7 +266,9 @@ pub async fn run_turn(
             match tokio::time::timeout(remaining, rx.recv()).await {
                 Ok(Some(msg)) => {
                     highest_processed = highest_processed.max(msg.read_seq());
-                    emit(handle_incoming(ctx, msg).await).await;
+                    let produced = handle_incoming(ctx, msg).await;
+                note_permission_requests(&produced, &mut opened_permissions);
+                emit(produced).await;
                 }
                 Ok(None) => agent_gone = true,
                 Err(_) => continue,
@@ -246,7 +279,21 @@ pub async fn run_turn(
     // Anything already queued beyond the response, such as an update the agent sent after
     // answering, is taken too rather than left for the next turn to misattribute.
     while let Ok(msg) = rx.try_recv() {
-        emit(handle_incoming(ctx, msg).await).await;
+        let produced = handle_incoming(ctx, msg).await;
+        note_permission_requests(&produced, &mut opened_permissions);
+        emit(produced).await;
+    }
+
+    // Requests nobody answered before the agent stopped waiting.
+    //
+    // Without this the waiter survives until its own ten-minute timeout, and for those ten minutes
+    // the interface offers buttons that do nothing and the daemon accepts an answer for a turn that
+    // is over — writing a decision into the log that no longer influenced anything, which is worse
+    // than losing it, because a later reader has no way to tell it apart from one that mattered.
+    for request_id in opened_permissions {
+        if ctx.ask_user.cancel(&request_id).await {
+            emit(vec![EventPayload::PermissionExpired { request_id }]).await;
+        }
     }
 
     emit(ctx.handle.end_turn(stop_reason).await).await;
@@ -356,7 +403,22 @@ async fn begin_permission(ctx: &TurnContext, id: Value, params: Value) -> Vec<Ev
                 )
             }
             None => {
-                let answer = waiter.await;
+                let outcome = waiter.await;
+                if outcome == Answered::Withdrawn {
+                    // Reply to the agent, because the protocol has an outstanding request and
+                    // leaving it open holds the turn's slot forever. Emit nothing: the turn's own
+                    // expiry event already says the question lapsed, and adding a resolution here
+                    // would make the log claim a decision alongside it.
+                    let reply = json!({ "outcome": { "outcome": "cancelled" } });
+                    if let Err(e) = handle.connection().respond(&id, reply).await {
+                        tracing::debug!(error = %e, "could not close out a lapsed permission");
+                    }
+                    return;
+                }
+                let answer = match outcome {
+                    Answered::With(option) => Some(option),
+                    _ => None,
+                };
                 if let Some(picked) = &answer {
                     if let Some(opt) = options.iter().find(|o| &o.option_id == picked) {
                         let decision = match opt.kind {
@@ -453,6 +515,19 @@ async fn handle_fs(
     vec![outcome.event]
 }
 
+/// Collects the ids of any permission requests in a batch of events.
+///
+/// Read back out of the emitted events rather than threaded through the call that makes them. The
+/// request is announced by returning an event, so the event is where the id already is, and a second
+/// path for the same fact is a second path that can disagree.
+fn note_permission_requests(produced: &[EventPayload], into: &mut Vec<String>) {
+    for p in produced {
+        if let EventPayload::PermissionRequested { request_id, .. } = p {
+            into.push(request_id.clone());
+        }
+    }
+}
+
 /// Canonical bytes for a permission decision.
 ///
 /// Everything that determines what will actually happen goes in, with a stable ordering, so
@@ -500,7 +575,9 @@ impl AskUser for AutoAllow {
         PermissionWaiter { rx, timeout: std::time::Duration::from_secs(1) }
     }
 
-    async fn cancel(&self, _request_id: &str) {}
+    async fn cancel(&self, _request_id: &str) -> bool {
+        false
+    }
 }
 
 /// The option id reported for an automatic allowance.

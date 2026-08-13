@@ -71,7 +71,7 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 
 ```bash
 cargo test --workspace              # 280 tests
-cd ui && pnpm vitest run            # 84 tests
+cd ui && pnpm vitest run            # 105 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 47 assertions, the conversation slice
 ./scripts/e2e-orchestration.sh      # 50 assertions, one run start to finish
@@ -444,6 +444,25 @@ It now compares the two elements to each other.
 **Three identical rows for three different pieces of work.** Orchestrated workers are rooted at
 `worktrees/<run>/<task>`, and the sidebar truncated the path from the right — which is where the
 distinguishing part is. All three read `/home/me/.local/state/wkbd/worktre…`.
+
+### Found by looking at screenshots a second time
+
+**A permission request outlived the turn that asked it.** The waiter stayed registered for its own
+ten-minute timeout after the turn ended, so the interface offered buttons for a question the agent
+had stopped waiting behind, and the daemon accepted an answer for a conversation that was over —
+writing into the log a decision that influenced nothing, which a later reader cannot tell apart from
+one that did. Outstanding requests are now closed out when the turn ends, a late answer is refused
+with 409, and the lapse is its own event rather than a refusal: nobody refused, the agent stopped
+waiting, and recording a choice no person made is the entry hardest to question afterwards.
+
+**Grouping the sidebar by project made it worse for the case it was added for.** An orchestrated
+worker's project *is* its own worktree, so grouping by directory produced one group per worker, each
+headed by a path ending in the run's uuid — three headings of noise around one row each, and three
+rows all reading "Worker". Workers are grouped by their run now and labelled by their task.
+
+**Six of the eleven archived screenshots showed a product the code no longer produced.** They were
+taken before the theme changed. A screenshot that is out of date is worse than no screenshot, because
+it is evidence for something untrue; they have all been retaken.
 
 ### Found by looking at the running shell
 

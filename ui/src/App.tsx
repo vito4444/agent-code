@@ -5,12 +5,32 @@ import { RulesScreen } from './components/rules/RulesScreen';
 import { RawInspector } from './components/inspector/RawInspector';
 import { RunList, StartRun } from './components/run/RunList';
 import { RunView } from './components/run/RunView';
-import { SessionList } from './components/sidebar/SessionList';
+import { SessionList, asWorker } from './components/sidebar/SessionList';
 import * as api from './lib/api';
 import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
 
 type Screen = 'chat' | 'rules' | 'inspector' | 'runs';
+
+/**
+ * The session a run's worker had, by task.
+ *
+ * Matched on the worktree path, which already contains the run and the task, so nothing extra has to
+ * be recorded to make the link. Called with no task to ask the weaker question — "is any of this
+ * run's work still open?" — which is what decides whether to offer the link at all.
+ */
+export function workerSessionFor(
+  sessions: api.SessionSummary[],
+  runId: string,
+  taskId?: string,
+): string | null {
+  for (const s of sessions) {
+    const worker = asWorker(s.project_root);
+    if (!worker || worker.runId !== runId) continue;
+    if (taskId === undefined || worker.task === taskId) return s.id;
+  }
+  return null;
+}
 
 /**
  * What the transcript says before there is one.
@@ -245,7 +265,24 @@ export function App() {
         {screen === 'runs' && (
           <section className="runs">
             {activeRun ? (
-              <RunView run={activeRun} onBack={() => setActiveRunId(null)} />
+              <RunView
+                run={activeRun}
+                onBack={() => setActiveRunId(null)}
+                onOpenTranscript={
+                  // Only offered when the worker's session is still around. The link is resolved
+                  // here rather than inside the run view because this is where the session list is,
+                  // and a run view that had to know about sessions would need both.
+                  workerSessionFor(store.sessionList, activeRun.id) !== null
+                    ? (taskId) => {
+                        const id = workerSessionFor(store.sessionList, activeRun.id, taskId);
+                        if (id) {
+                          useStore.getState().setActiveSession(id);
+                          setScreen('chat');
+                        }
+                      }
+                    : undefined
+                }
+              />
             ) : (
               <>
                 <h1>Runs</h1>
@@ -283,6 +320,11 @@ export function App() {
               )}
             </div>
 
+            {/* No session means nothing to send to, and a composer with a Send button that cannot
+                send is an affordance for something impossible. The empty state above already says
+                what to do instead, so this is absent rather than disabled: a disabled control still
+                asks the reader to work out why. */}
+            {activeId && (
             <Composer
               agentName={summary?.agent_display_name ?? 'no agent'}
               configOptions={session.configOptions}
@@ -320,6 +362,7 @@ export function App() {
                 if (activeId) useStore.getState().dequeue(activeId, id);
               }}
             />
+            )}
           </>
         )}
       </main>

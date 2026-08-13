@@ -217,6 +217,7 @@ export type EventPayload =
   | { event: 'run'; run: RunEvent }
   | { event: 'unknown_update'; discriminant: string; raw: string }
   | { event: 'agent_error'; message: string }
+  | { event: 'permission_expired'; request_id: string }
   | { event: 'agent_exited'; code: number | null; signal: number | null }
   | {
       /**
@@ -270,6 +271,14 @@ export type TurnItem =
       options: PermissionOption[];
       resolved_with: string | null;
       auto: boolean;
+      /**
+       * The turn ended before anybody answered.
+       *
+       * Distinct from `resolved_with === null`, which means the request is still open. An expired
+       * request must not keep offering buttons: the agent has stopped waiting, so pressing one posts
+       * a decision into a conversation that has already moved on.
+       */
+      expired: boolean;
     }
   | { type: 'error'; message: string }
   | {

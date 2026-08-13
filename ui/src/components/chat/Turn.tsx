@@ -80,6 +80,7 @@ function ItemView({
           options={item.options}
           resolvedWith={item.resolved_with}
           auto={item.auto}
+          expired={item.expired}
           onAnswer={onAnswerPermission}
         />
       );
@@ -108,6 +109,7 @@ export function PermissionCard({
   options,
   resolvedWith,
   auto,
+  expired = false,
   onAnswer,
 }: {
   requestId: string;
@@ -115,13 +117,20 @@ export function PermissionCard({
   options: PermissionOption[];
   resolvedWith: string | null;
   auto: boolean;
+  /** The turn ended with nobody having answered. */
+  expired?: boolean;
   onAnswer?: (requestId: string, optionId: string | null) => void;
 }) {
   const answered = resolvedWith !== null;
   const chosen = options.find((o) => o.option_id === resolvedWith);
 
   return (
-    <div className="permission" data-answered={answered} data-testid={`permission-${requestId}`}>
+    <div
+      className="permission"
+      data-answered={answered}
+      data-expired={expired}
+      data-testid={`permission-${requestId}`}
+    >
       <div className="permission-title">
         <span className="permission-icon" aria-hidden="true">
           {'\u26a0'}
@@ -129,7 +138,14 @@ export function PermissionCard({
         {title}
       </div>
 
-      {answered ? (
+      {expired && !answered ? (
+        /* No buttons. The agent stopped waiting when the turn ended, so pressing one would post a
+           decision into a conversation that has already moved on — and the record would then show a
+           choice that influenced nothing, indistinguishable from one that did. */
+        <div className="permission-outcome" data-testid={`permission-expired-${requestId}`}>
+          Not answered — the turn ended first
+        </div>
+      ) : answered ? (
         <div className="permission-outcome">
           {chosen ? chosen.name : 'cancelled'}
           {auto && (

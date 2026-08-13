@@ -3,7 +3,7 @@
 Captured on this machine: Ubuntu 24.04, X11 on display `:1`, software rendering
 (`LIBGL_ALWAYS_SOFTWARE=1`), WebKitGTK 2.52.3, GTK 3.24.41.
 
-`tauri-linux-transcript.png` is the shell showing one finished turn. Worth looking at for four
+`paper-transcript.png` is the shell showing one finished turn. Worth looking at for four
 things that are easy to get wrong and are visible here:
 
 - **Three separate collapsed "Thought process" blocks in one turn.** A real agent thinks between
@@ -35,7 +35,7 @@ and it says why in words — "a symlink led outside the workspace" rather than `
 The stored value stays the identifier so logs and tests can match on it; the sentence is for the
 person being told their agent was stopped.
 
-`tauri-linux-empty.png` is the same shell with no session open, which is the state that shows the
+`paper-empty.png` is the same shell with no session open, which is the state that shows the
 autonomy selector sitting above the input box rather than in the row with the per-moment controls.
 
 `run-view.png` is one orchestrated run, and it is the densest of these. Four things in it are the
@@ -62,10 +62,16 @@ merge` — the status a run sits in indefinitely rather than a spinner that reso
 "passed through verbatim, they are never rewritten, and nothing in the learning system can retire
 them."
 
-`worker-transcript.png` is a worker session's own conversation, which is worth a look because it shows
-exactly what a dispatched agent is told: the paths it may change, the assertions that will judge it,
-and the paths that are read-only and will be restored if it changes them. A worker that does not know
-which tests decide its fate optimises for looking finished.
+`sidebar-grouping.png` is the sidebar with a run in progress, and it is there because the first
+version of this grouping was worse than no grouping. Sessions were grouped by directory, which is
+literally what an orchestrated worker is — each has its own worktree — and that produced one group
+per worker, each headed by a path ending in the run's uuid: three headings of noise around one row
+each, and three rows all reading "Worker". Workers are grouped by their run now and labelled by their
+task, which is what a reader wants and was already in the path.
+
+Every screenshot here was retaken after the theme changed. Six of them had not been, and a
+screenshot that shows a product the code no longer produces is worse than no screenshot, because it
+is evidence for something untrue.
 
 ## Two corrections to earlier claims
 

@@ -744,7 +744,7 @@ impl AskUser for PendingPrompt {
         PermissionWaiter::new(rx, std::time::Duration::from_secs(600))
     }
 
-    async fn cancel(&self, request_id: &str) {
-        self.state.clear_permission_wait(request_id).await;
+    async fn cancel(&self, request_id: &str) -> bool {
+        self.state.clear_permission_wait(request_id).await
     }
 }
