@@ -691,10 +691,18 @@ nothing appears outside it.
   task's declaration is the point: overlapping declarations are what force two tasks to run in
   sequence, so a task that took paths it did not declare may belong in a different wave than the one
   it ran in.
-- **`known_tests` is always empty.** Enumerating a repository's tests means running its build, so
-  the validator degrades to accepting any identifier rather than skipping validation. A task can
-  therefore name an assertion that does not exist, and it will fail at acceptance instead of at
-  validation — later and more expensively than it should.
+- ~~**`known_tests` is always empty.**~~ It still is, and that is now the narrow statement it
+  should always have been. Enumerating a repository's tests means running its build; *recognising*
+  whether a proposed name appears in the tree does not, and recognising is what the validator
+  needs. `crates/wkbd-core/src/inventory.rs` scans the project's text and matches an identifier by
+  its last segment, because runners qualify names and source files do not.
+
+  Two things to know before touching it. It is checked against `must_still_pass` only —
+  `must_pass` names what has to pass *after* the change and may not exist yet, so validating it
+  would refuse every task doing test-driven work. And it fails towards accepting everywhere: a
+  scan that hits a limit, cannot read the tree, or reduces an identifier to two characters says
+  yes. A macro-generated test whose name is never written literally would be rejected, which is
+  the failure worth watching for, because it sends the planner back to redraft a correct graph.
 
 ## 7. Unverified claims
 
