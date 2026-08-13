@@ -642,6 +642,12 @@ nothing appears outside it.
   End-anchored scrolling is done — `ui/src/lib/stickToBottom.ts` — and a virtualized list has to
   cooperate with it rather than replace it: it follows growth through a `MutationObserver`, which
   a windowing implementation would have to keep firing.
+- **Proposals are identified by their content hash, and a decided one does not come back.** Which
+  the distiller forced: it reads the whole history after every run, so what it found last week it
+  finds again every week. Pending, approved, applied and rejected all block a new row; expired,
+  voided and superseded do not, because nobody weighed those on their merits. Whether a proposal
+  lost to the daily budget can return is the budget policy's existing choice — `RejectByDefault`
+  means what its comment says.
 - ~~**The approval queue has no interface.**~~ It has one, and the loop is closed end to end: a run
   raises a proposal with its evidence, the queue shows it, approving it applies it, and the playbook
   gains the bullet. Verified in the desktop shell as well as in the suite.
@@ -652,8 +658,27 @@ nothing appears outside it.
   somebody declares prices with `--agent-cost` every arm costs the same and the objective degenerates
   to "the arm most likely to pass". Stated rather than papered over, because inventing prices would
   produce a router confidently optimising something nobody measured.
-- **Distillation does not run.** Repeated successful patterns are not turned into reusable workflows,
-  which is the third loop.
+- ~~**Distillation does not run.**~~ It runs, and the third loop turns: after every run, every
+  finished task in the project is reduced to a normalised step sequence, and a sequence that
+  succeeded on three separate occasions with an external signal each time becomes a workflow
+  proposal. Three limits are deliberate and worth knowing before changing them.
+
+  **The occasion is the run, not the task.** An orchestrated run splits one goal into tasks that
+  resemble each other by construction, so three siblings that all passed are one planner getting
+  one decision right. `RunSummary::occasion` exists for this and the gate counts distinct values
+  of it.
+
+  **The step signature is coarse on purpose, and coarse enough to be wrong.** An agent's tool call
+  titles are prose it wrote, so grouping on them makes every task unique — which looks like a
+  distiller that never fires rather than like a bad signature. A step is its kind plus a file
+  extension or a program name, and consecutive duplicates collapse. Two tasks that did different
+  things in the same shape will group. That is what the approval queue is for; the proposal cites
+  its runs.
+
+  **`crates/wkbd-core/src/trace.rs` reads the event log, not the `tasks` table.** The table looks
+  like the obvious source and is empty: nothing has ever written a row to it. `tasks`, `task_deps`
+  and `verifications` are all dead schema — the durable workflow checkpoints into `step_outputs`.
+  Worth deleting or filling, but not silently left as a trap for the next person to reach for.
 - **A worker's permission requests are answered automatically.** An orchestrated worker has nobody
   watching it: waiting for a person stalls every parallel run on its first tool call, and the wait
   times out into a refusal, so "ask" and "refuse everything" are the same policy. They are allowed
