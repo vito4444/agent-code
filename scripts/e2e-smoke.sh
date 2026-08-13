@@ -6,6 +6,9 @@
 # rather than in a crate's own tests. Specifically it asserts that a turn producing several
 # thought segments ends with at most one of them live, which is the property the whole
 # layered transcript depends on and which a single-thought test double cannot exercise.
+# Not concurrent with the other scripts here. Every one of them kills daemons by name, so two
+# running at once take each other's processes down — which surfaces as a section that connects for
+# its first few assertions and then reports every remaining one against an empty string.
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -518,6 +521,11 @@ for _ in $(seq 1 60); do
     curl -sf "http://127.0.0.1:$AT_PORT/api/health" > /dev/null 2>&1 && break
     sleep 0.2
 done
+if ! curl -sf "http://127.0.0.1:$AT_PORT/api/health" > /dev/null 2>&1; then
+    echo "FAIL the attachment daemon did not start"
+    tail -20 "$AT_STATE/daemon.log" 2>/dev/null || true
+    FAILED=1
+fi
 
 attach_turn() {
     # $1 agent id, $2 mention path. Echoes the flattened answer text.
@@ -525,7 +533,14 @@ attach_turn() {
     sid=$(curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions" \
         -H 'content-type: application/json' \
         -d "{\"agent_id\":\"$agent\",\"project_root\":\"$AT_PROJECT\"}" | jq -r '.id // empty')
-    [ -z "$sid" ] && { echo ""; return; }
+    # A failure here used to echo nothing, and every assertion downstream then reported an empty
+    # string against its expectation — which says that something went wrong and nothing about what.
+    if [ -z "$sid" ]; then
+        echo "COULD NOT OPEN A SESSION FOR $agent" >&2
+        tail -20 "$AT_STATE/daemon.log" >&2 2>/dev/null || true
+        echo ""
+        return
+    fi
     echo "$sid" > "$AT_STATE/last-sid"
     curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions/$sid/prompt" \
         -H 'content-type: application/json' \
@@ -595,6 +610,38 @@ ESCAPE=$(curl -s -o "$AT_STATE/escape.json" -w '%{http_code}' \
 check "boundary: a mention cannot escape the project root" "400" "$ESCAPE"
 check "boundary: and the refusal names the path" "true" \
     "$(jq -r '.error|test("etc/passwd")' "$AT_STATE/escape.json" 2>/dev/null || echo false)"
+
+# ---------------------------------------------------------------- the protocol log
+#
+# Asserted here because this is the daemon that has sent an attachment, and an attachment is what
+# broke it: an embedded resource is up to 256 kB in one frame, the buffer bounds the number of
+# frames and nothing bounded their size, and the screen that displayed them filled with one prompt.
+# None of it was covered end to end, which is why none of it had been noticed.
+FRAMES="$AT_STATE/frames.json"
+curl -sf "http://127.0.0.1:$AT_PORT/api/raw?limit=500" > "$FRAMES" || echo '[]' > "$FRAMES"
+check_ge "the protocol log kept frames" 6 "$(jq -r 'length' "$FRAMES")"
+check "both directions are recorded" "2" \
+    "$(jq -r '[.[].direction]|unique|length' "$FRAMES")"
+# A monotonic cursor, and not the buffer index: the ring drops a thousand entries from the front
+# when it fills, after which an index points at a different frame than it did a moment ago.
+check "every frame carries a monotonic sequence" "true" \
+    "$(jq -r '[.[].seq] == ([.[].seq]|sort) and ([.[].seq]|unique|length) == length' "$FRAMES")"
+
+LAST_SEQ=$(jq -r '.[-1].seq' "$FRAMES")
+check "asking for what is already seen returns nothing" "0" \
+    "$(curl -sf "http://127.0.0.1:$AT_PORT/api/raw?since=$LAST_SEQ" | jq -r 'length')"
+check "asking from the start returns everything" "$(jq -r 'length' "$FRAMES")" \
+    "$(curl -sf "http://127.0.0.1:$AT_PORT/api/raw?since=0" | jq -r 'length')"
+
+# The frame carrying the attachment. Clipped, and saying how much is missing rather than just
+# ending — a debugging aid that trails off is worse than one that says it stopped.
+check "a frame carrying a file is clipped" "true" \
+    "$(jq -r '[.[]|select(.clipped_bytes != null and .clipped_bytes > 0)]|length >= 1' "$FRAMES")"
+check "and no kept frame exceeds the bound" "true" \
+    "$(jq -r '[.[]|select((.line|length) > 4096)]|length == 0' "$FRAMES")"
+# The front is what carries the shape, so that is the end that survives.
+check "the clipped frame still shows what it was" "true" \
+    "$(jq -r '[.[]|select(.clipped_bytes != null)]|first|.line|test("session/prompt")' "$FRAMES")"
 
 kill "$DAEMON4_PID" 2>/dev/null || true
 wait "$DAEMON4_PID" 2>/dev/null || true

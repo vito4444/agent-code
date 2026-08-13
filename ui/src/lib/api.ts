@@ -228,6 +228,8 @@ export function deleteRule(id: string): Promise<void> {
 
 /** One ACP frame as the daemon kept it, which may be the front of a longer one. */
 export interface RawFrame {
+  /** Monotonic within a daemon run. Used to ask only for what has not been seen. */
+  seq: number;
   at_ms: number;
   direction: string;
   agent_id: string;
@@ -240,4 +242,9 @@ export interface RawFrame {
 /** Raw ACP frames, for the message inspector. */
 export function fetchRawFrames(limit = 500): Promise<RawFrame[]> {
   return json(`/raw?limit=${limit}`);
+}
+
+/** Everything after `since`. Empty when nothing has arrived, which is the common case. */
+export function fetchRawFramesSince(since: number): Promise<RawFrame[]> {
+  return json(`/raw?since=${since}`);
 }

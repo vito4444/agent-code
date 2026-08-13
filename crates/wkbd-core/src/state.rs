@@ -21,6 +21,11 @@ use wkbd_store::Store;
 /// A frame as the inspector shows it.
 #[derive(Clone, serde::Serialize)]
 pub struct InspectorFrame {
+    /// Monotonic within a daemon run, so a reader can ask for what it has not seen.
+    ///
+    /// Not the buffer index: the ring drops a thousand entries from the front when it fills, and
+    /// an index would then point at a different frame than it did a moment ago.
+    pub seq: u64,
     pub at_ms: i64,
     pub direction: &'static str,
     pub agent_id: String,
@@ -463,7 +468,9 @@ pub fn spawn_dispatchers(
     }
 
     tokio::spawn(async move {
+        let mut seq: u64 = 0;
         while let Some((key, frame)) = raw.recv().await {
+            seq += 1;
             let mut log = state.raw.lock().await;
             // Bounded ring. The inspector is a debugging aid, not an archive, and an
             // unbounded buffer of every frame from a long session is a memory leak with a
@@ -473,6 +480,7 @@ pub fn spawn_dispatchers(
             }
             let (line, clipped_bytes) = clip_frame(frame.line);
             log.push(InspectorFrame {
+                seq,
                 at_ms: frame.at_ms,
                 direction: match frame.direction {
                     Direction::ToAgent => "to_agent",

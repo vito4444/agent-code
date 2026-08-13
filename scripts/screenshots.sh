@@ -12,7 +12,16 @@
 # path serves the same interface — but these are shell screenshots on purpose, because they are
 # evidence about the whole stack rather than about the interface in isolation.
 #
+# Not concurrent with the other scripts here. Every one of them kills daemons by name, so two
+# running at once take each other's processes down — which surfaces as a section that connects for
+# its first few assertions and then reports every remaining one against an empty string.
 # Usage: ./scripts/screenshots.sh [output-dir]
+#
+# WKBD_ONLY=paper-transcript,run-view captures just those and skips the rest, which exists because
+# the full set takes five and a half minutes and a review loop that costs five and a half minutes
+# per look is a review loop nobody runs twice. Everything still happens — the runs, the clicks, the
+# navigation — because a capture taken from a state the script did not reach is the kind of evidence
+# this script was written to stop producing. Only the file writes are skipped.
 
 set -uo pipefail
 
@@ -68,7 +77,13 @@ click() {
     DISPLAY="$DISPLAY_NUM" xdotool click 1
     sleep "${3:-2.5}"
 }
-shot() { DISPLAY="$DISPLAY_NUM" import -window "$WID" "$OUT/$1.png" && echo "  $1.png"; }
+ONLY="${WKBD_ONLY:-}"
+shot() {
+    if [ -n "$ONLY" ] && ! printf '%s' ",$ONLY," | grep -q ",$1,"; then
+        return 0
+    fi
+    DISPLAY="$DISPLAY_NUM" import -window "$WID" "$OUT/$1.png" && echo "  $1.png"
+}
 
 # The first clickable row on a list screen, found rather than assumed.
 #

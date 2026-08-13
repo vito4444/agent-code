@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { fetchRawFrames, type RawFrame } from '../../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import { fetchRawFrames, fetchRawFramesSince, type RawFrame } from '../../lib/api';
 
 /**
  * Raw protocol frames, in both directions, exactly as they crossed the wire.
@@ -22,21 +22,94 @@ function formatClip(bytes: number): string {
   return `${size} more, not kept — the inspector holds the first 4 kB of a frame`;
 }
 
+/** Characters shown before a frame has to be asked to open. */
+const HEAD_CHARS = 420;
+
+/**
+ * One frame's text, short by default.
+ *
+ * Two limits, and conflating them was the first mistake here. The daemon keeps 4 kB of a frame,
+ * which is the right amount to *hold*: it covers the method, the parameters and the front of any
+ * payload. It is the wrong amount to *show* — 4 kB is about forty lines, so a single prompt
+ * carrying an attachment still filled the viewport and buried every frame around it. This is a
+ * log; a reader scans it and opens the one line they care about.
+ *
+ * Expanding needs no refetch, because the 4 kB is already here.
+ */
+function FrameBody({ frame }: { frame: RawFrame }) {
+  const [open, setOpen] = useState(false);
+  const long = frame.line.length > HEAD_CHARS;
+  const body = open || !long ? frame.line : `${frame.line.slice(0, HEAD_CHARS)}\u2026`;
+  const hidden = frame.line.length - HEAD_CHARS;
+
+  return (
+    <>
+      <pre className="frame-line" data-open={open}>
+        {body}
+      </pre>
+      {long && (
+        <button
+          type="button"
+          className="frame-more"
+          onClick={() => setOpen((v) => !v)}
+          data-testid={`frame-more-${frame.seq}`}
+        >
+          {open ? 'show less' : `show ${hidden} more characters`}
+        </button>
+      )}
+      {frame.clipped_bytes !== null && frame.clipped_bytes > 0 && (
+        /* Outside the <pre>, because everything inside it is exactly what crossed the pipe, and a
+           note wearing the same clothes as the data is how a debugging aid starts lying. */
+        <p className="frame-clipped">{formatClip(frame.clipped_bytes)}</p>
+      )}
+    </>
+  );
+}
+
 export function RawInspector() {
   const [frames, setFrames] = useState<RawFrame[]>([]);
   const [filter, setFilter] = useState('');
   const [onlyMalformed, setOnlyMalformed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The tail once, then only what is new. Polling the whole log every second re-sent, re-parsed
+  // and re-rendered every frame whether or not anything had changed — on the screen somebody opens
+  // when an agent is already misbehaving.
+  //
+  // A ref rather than state for the cursor: the interval closes over it, and a cursor in state
+  // would either re-create the interval on every batch or be read stale by the one that exists.
+  const cursor = useRef(0);
+
   useEffect(() => {
-    const load = () => {
-      fetchRawFrames()
-        .then(setFrames)
-        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    let live = true;
+    const fail = (e: unknown) => {
+      if (live) setError(e instanceof Error ? e.message : String(e));
     };
-    load();
-    const timer = setInterval(load, 1000);
-    return () => clearInterval(timer);
+
+    fetchRawFrames()
+      .then((first) => {
+        if (!live) return;
+        setFrames(first);
+        cursor.current = first.length > 0 ? first[first.length - 1].seq : 0;
+      })
+      .catch(fail);
+
+    const timer = setInterval(() => {
+      fetchRawFramesSince(cursor.current)
+        .then((batch) => {
+          if (!live || batch.length === 0) return;
+          cursor.current = batch[batch.length - 1].seq;
+          // Trimmed to the same bound the daemon keeps, so a long session does not grow this list
+          // without limit — the buffer over there is a ring for the same reason.
+          setFrames((prev) => [...prev, ...batch].slice(-5000));
+        })
+        .catch(fail);
+    }, 1000);
+
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
   }, []);
 
   const shown = frames.filter((f) => {
@@ -79,14 +152,7 @@ export function RawInspector() {
             <span className="frame-agent">{f.agent_id}</span>
             <span className="frame-time">{new Date(f.at_ms).toLocaleTimeString()}</span>
             {f.malformed && <span className="frame-bad">not JSON</span>}
-            <pre className="frame-line">{f.line}</pre>
-            {f.clipped_bytes !== null && f.clipped_bytes > 0 && (
-              /* Outside the <pre>, because everything inside it is exactly what crossed the pipe
-                 and a note in the same clothes as the data is how a debugging aid starts lying.
-                 An attached file arrives here as a JSON string of its whole contents, so one
-                 prompt used to fill the screen and bury every frame around it. */
-              <p className="frame-clipped">{formatClip(f.clipped_bytes)}</p>
-            )}
+            <FrameBody frame={f} />
           </li>
         ))}
       </ol>

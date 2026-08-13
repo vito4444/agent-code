@@ -17,6 +17,9 @@
 # The first graph deliberately contains a task the validator will reject, so the redraft path runs
 # too. A replan loop that is never exercised is a replan loop that does not work.
 
+# Not concurrent with the other scripts here. Every one of them kills daemons by name, so two
+# running at once take each other's processes down — which surfaces as a section that connects for
+# its first few assertions and then reports every remaining one against an empty string.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

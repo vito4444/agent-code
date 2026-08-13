@@ -899,16 +899,35 @@ async fn delete_rule(
 #[derive(Deserialize)]
 struct RawQuery {
     limit: Option<usize>,
+    /// Highest `seq` the caller already has. Omitted means "the tail, whatever it is".
+    since: Option<u64>,
 }
 
+/// Frames, either the tail or everything after a cursor.
+///
+/// The cursor exists because this screen polls: without one it re-sent, re-parsed and re-rendered
+/// the whole visible log every second whether or not anything had changed — and this is the screen
+/// somebody opens when an agent is already misbehaving, which is the worst moment for the interface
+/// to be adding work of its own.
 async fn raw_frames(
     State(state): State<Arc<AppState>>,
     Query(q): Query<RawQuery>,
 ) -> impl IntoResponse {
     let log = state.raw.lock().await;
-    let limit = q.limit.unwrap_or(500).min(5_000);
-    let start = log.len().saturating_sub(limit);
-    Json(log[start..].to_vec())
+    match q.since {
+        // Ordered by construction, so a scan from the back stops at the first one already seen.
+        // The alternative — a binary search — would be wrong the moment the ring drops entries,
+        // because then the buffer's first seq is not 1.
+        Some(since) => {
+            let start = log.partition_point(|f| f.seq <= since);
+            Json(log[start..].to_vec())
+        }
+        None => {
+            let limit = q.limit.unwrap_or(500).min(5_000);
+            let start = log.len().saturating_sub(limit);
+            Json(log[start..].to_vec())
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ streaming */
