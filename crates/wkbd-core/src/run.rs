@@ -772,7 +772,7 @@ impl RunEngine {
         let agent_for_step = agent.clone();
         let result: TaskResult = wf
             .step(&format!("task/{}/dispatch", task.id), || async {
-                self.dispatch(task, &ws, &agent_for_step).await
+                self.dispatch(task, &ws, &agent_for_step, repo).await
             })
             .await
             .with_context(|| format!("dispatching {}", task.id))?;
@@ -912,12 +912,18 @@ impl RunEngine {
         task: &DraftTask,
         ws: &WorkspaceRecord,
         agent_id: &str,
+        project_root: &Path,
     ) -> Result<TaskResult> {
         let session = self
             .state
             .open_session(
                 agent_id,
+                // Works in the worktree, remembers as the project. A worker scoped to its own
+                // worktree gets no user rules, no recalled facts and no playbook, because
+                // nobody has ever written any of those about a directory that did not exist
+                // ten seconds ago.
                 &ws.path,
+                &project_root.to_string_lossy(),
                 wkbd_agent::SessionPurpose::OrchestratorWorker,
             )
             .await

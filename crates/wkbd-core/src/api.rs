@@ -167,7 +167,12 @@ async fn create_session(
     Json(body): Json<CreateSession>,
 ) -> Result<impl IntoResponse, ApiError> {
     let session = state
-        .open_session(&body.agent_id, &body.project_root, SessionPurpose::NewChat)
+        .open_session(
+            &body.agent_id,
+            &body.project_root,
+            &body.project_root,
+            SessionPurpose::NewChat,
+        )
         .await
         .map_err(ApiError::internal)?;
 

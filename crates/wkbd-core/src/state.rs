@@ -127,10 +127,20 @@ impl AppState {
         *self.runs.lock().unwrap_or_else(|e| e.into_inner()) = Some(engine);
     }
 
+    /// Opens a session.
+    ///
+    /// `cwd` is where the agent works. `memory_scope` is the project it belongs to, and they are
+    /// only the same thing for a conversation somebody started themselves. An orchestrated worker
+    /// works in a throwaway worktree, and scoping its memory there means it gets none: user rules
+    /// written for the project do not match, recalled facts do not match, and the playbook does
+    /// not match. Every one of those looks to the user like a setting that silently stopped
+    /// applying in one place — which is the failure this separation exists to prevent, and which
+    /// the worker path had.
     pub async fn open_session(
         self: &Arc<Self>,
         agent_id: &str,
         project_root: &str,
+        memory_scope: &str,
         purpose: SessionPurpose,
     ) -> Result<Arc<LiveSession>> {
         let spec = self.agent(agent_id).context("no such agent")?.clone();
@@ -152,6 +162,7 @@ impl AppState {
                     client_capabilities: crate::fs_bridge::client_capabilities(
                         self.offer_client_fs,
                     ),
+                    memory_scope: memory_scope.to_string(),
                 },
                 |spec, config| build_agent_command(spec, config),
             )

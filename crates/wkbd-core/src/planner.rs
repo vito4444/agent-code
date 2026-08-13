@@ -434,6 +434,8 @@ impl AgentPlanner {
             .open_session(
                 &self.agent_id,
                 &self.project_root,
+                // The planner works in the project itself, so the two coincide here.
+                &self.project_root,
                 wkbd_agent::SessionPurpose::NewChat,
             )
             .await

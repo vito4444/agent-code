@@ -63,13 +63,19 @@ impl SessionPurpose {
 pub struct Prelude {
     /// Verbatim user rules. No confidence annotation, because they are not claims.
     pub rules: Vec<String>,
+    /// Approved working notes: what previous runs in this project turned out to need.
+    ///
+    /// Between the two other bands because that is where their authority sits. A person agreed
+    /// to each of these, which a recalled fact never had, and none of them is an instruction
+    /// somebody wrote, which every rule is.
+    pub notes: Vec<String>,
     /// Recalled memories, each already rendered with its provenance.
     pub memories: Vec<String>,
 }
 
 impl Prelude {
     pub fn is_empty(&self) -> bool {
-        self.rules.is_empty() && self.memories.is_empty()
+        self.rules.is_empty() && self.notes.is_empty() && self.memories.is_empty()
     }
 
     /// Renders the prelude.
@@ -85,6 +91,18 @@ impl Prelude {
             for r in &self.rules {
                 out.push_str("- ");
                 out.push_str(r);
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        if !self.notes.is_empty() {
+            out.push_str(
+                "## Working notes (what previous runs here needed, approved by the user; \
+                 a user rule above wins over any of them)\n",
+            );
+            for n in &self.notes {
+                out.push_str("- ");
+                out.push_str(n);
                 out.push('\n');
             }
             out.push('\n');
@@ -134,6 +152,11 @@ pub struct SessionOpenRequest {
     /// There is no in-place model switch; pretending otherwise would be a control that
     /// appears to work and changes nothing.
     pub handoff_summary: Option<String>,
+    /// The project this session's standing context comes from.
+    ///
+    /// Separate from `project_root`, which is where the agent works. They differ for an
+    /// orchestrated worker, whose worktree is a directory nobody has ever written a rule about.
+    pub memory_scope: String,
     /// What we tell the agent we can do for it, sent verbatim at `initialize`.
     ///
     /// Supplied by the caller rather than fixed here, because whether to offer client-side file
@@ -381,7 +404,7 @@ impl SessionFactory {
         }
 
         // The prelude is fetched here, for every purpose, with no branch that can skip it.
-        let mut prelude = self.prelude.prelude_for(&req.project_root, req.purpose);
+        let mut prelude = self.prelude.prelude_for(&req.memory_scope, req.purpose);
         if let Some(summary) = &req.handoff_summary {
             prelude.memories.push(format!(
                 "Continuing from an earlier session that had to be restarted to apply a \

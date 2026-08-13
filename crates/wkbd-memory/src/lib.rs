@@ -29,19 +29,43 @@ use wkbd_store::Store;
 pub struct StorePrelude {
     store: Store,
     max_memories: usize,
+    /// Smaller than the memory budget. A note is a procedure the user agreed to follow, so the
+    /// marginal one is less useful than the last and dilutes the ones above it; the same
+    /// reasoning the playbook module gives for having a budget at all.
+    max_notes: usize,
 }
 
 impl StorePrelude {
     pub fn new(store: Store) -> Self {
-        Self { store, max_memories: 12 }
+        Self { store, max_memories: 12, max_notes: 8 }
     }
 
     pub fn with_budget(store: Store, max_memories: usize) -> Self {
-        Self { store, max_memories }
+        Self { store, max_memories, max_notes: 8 }
     }
 
     async fn build(&self, project_root: &str, purpose: SessionPurpose) -> Result<Prelude> {
         let rules = rules::applicable(&self.store, project_root).await?;
+
+        // Approved working notes. This crate reaches into `wkbd-evolve` for them rather than the
+        // daemon assembling the three bands itself, because their *order* is the mechanism —
+        // instructions above approved observations above inferred evidence — and an ordering
+        // enforced in two places is an ordering that will eventually differ between them.
+        //
+        // Until this call existed the playbook was write-only: bullets were proposed, approved,
+        // applied, stored, and read by nothing. Two of the three learning loops ended in a table
+        // no session ever consulted.
+        let notes: Vec<String> = wkbd_evolve::playbook::top_for_injection(
+            &self.store,
+            project_root,
+            self.max_notes,
+            wkbd_store::now_ms(),
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|b| b.body.trim().to_string())
+        .collect();
 
         // Recall is scoped to the project and ordered by recency. A query-driven recall
         // happens during the run through a tool; this is the standing context, so there is no
@@ -69,12 +93,14 @@ impl StorePrelude {
         // the failure this whole arrangement exists to prevent.
         tracing::debug!(
             ?purpose,
+            scope = project_root,
             rules = rules.len(),
+            notes = notes.len(),
             memories = candidates.len(),
             "built session prelude"
         );
 
-        Ok(Prelude { rules, memories })
+        Ok(Prelude { rules, notes, memories })
     }
 }
 
@@ -86,6 +112,7 @@ impl PreludeProvider for StorePrelude {
         let store = self.store.clone();
         let root = project_root.to_string();
         let budget = self.max_memories;
+        let notes = self.max_notes;
         let handle = tokio::runtime::Handle::try_current();
 
         let result = match handle {
@@ -93,7 +120,7 @@ impl PreludeProvider for StorePrelude {
                 scope
                     .spawn(|| {
                         handle.block_on(async {
-                            StorePrelude { store, max_memories: budget }
+                            StorePrelude { store, max_memories: budget, max_notes: notes }
                                 .build(&root, purpose)
                                 .await
                         })

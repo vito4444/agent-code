@@ -105,6 +105,7 @@ async fn run_turn(
                 spec: spec_for(profile, live_config),
                 config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                 project_root: "/tmp".into(),
+                memory_scope: "/tmp".into(),
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
@@ -371,6 +372,7 @@ async fn a_non_json_banner_on_stdout_does_not_break_the_handshake() {
                 spec,
                 config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                 project_root: "/tmp".into(),
+                memory_scope: "/tmp".into(),
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
@@ -395,6 +397,7 @@ async fn a_process_that_dies_mid_request_fails_the_request_instead_of_hanging() 
                 spec: spec_for("crash", false),
                 config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                 project_root: "/tmp".into(),
+                memory_scope: "/tmp".into(),
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
@@ -429,6 +432,7 @@ async fn cancelling_settles_the_open_tool_call() {
                 spec: spec_for("stall", false),
                 config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                 project_root: "/tmp".into(),
+                memory_scope: "/tmp".into(),
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
@@ -571,6 +575,7 @@ async fn a_runtime_config_change_is_reported_honestly_when_the_agent_refuses() {
                 spec,
                 config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                 project_root: "/tmp".into(),
+                memory_scope: "/tmp".into(),
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
@@ -600,6 +605,7 @@ async fn a_runtime_config_change_succeeds_when_the_agent_supports_it() {
                 spec: spec_for("rich", true),
                 config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                 project_root: "/tmp".into(),
+                memory_scope: "/tmp".into(),
                 purpose: SessionPurpose::NewChat,
                 resume_acp_session_id: None,
                 handoff_summary: None,
@@ -634,6 +640,7 @@ async fn config_options_survive_absent_and_unknown_categories() {
                     spec: spec_for("rich", true),
                     config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                     project_root: "/tmp".into(),
+                    memory_scope: "/tmp".into(),
                     purpose: SessionPurpose::NewChat,
                     resume_acp_session_id: None,
                     handoff_summary: None,
@@ -666,6 +673,7 @@ async fn config_options_survive_absent_and_unknown_categories() {
 async fn every_session_purpose_receives_the_prelude() {
     let prelude = Prelude {
         rules: vec!["Always answer in Chinese".into()],
+        notes: vec!["Workflow \"changes to .rs\": edit *.rs -> execute cargo".into()],
         memories: vec!["[confidence 0.8] this repo uses pnpm".into()],
     };
 
@@ -680,6 +688,7 @@ async fn every_session_purpose_receives_the_prelude() {
                     spec: spec_for("spartan", false),
                     config: LaunchConfig { values: BTreeMap::new(), cwd: "/tmp".into() },
                     project_root: "/tmp".into(),
+                    memory_scope: "/tmp".into(),
                     purpose: *purpose,
                     // Resume is exercised with an id the double does not know, which also
                     // covers the fallback from a failed session/load to a new session.
@@ -715,17 +724,27 @@ async fn every_session_purpose_receives_the_prelude() {
 fn the_prelude_puts_rules_above_memories_and_never_annotates_them() {
     let p = Prelude {
         rules: vec!["Ask before adding a dependency".into()],
+        notes: vec!["Run the formatter before the tests".into()],
         memories: vec!["[confidence 0.6 | run 412] the build uses cargo".into()],
     };
     let text = p.render();
 
     let rule_at = text.find("Ask before adding").unwrap();
+    let note_at = text.find("Run the formatter").unwrap();
     let memory_at = text.find("the build uses cargo").unwrap();
-    assert!(rule_at < memory_at, "rules must come first");
+
+    // Three bands in order of authority: an instruction somebody wrote, an observation
+    // somebody approved, an inference nobody has seen. Each band's heading says which it is,
+    // because a single undifferentiated list is weighed as one kind of thing and the shortest
+    // item — the instruction — loses to the longest.
+    assert!(rule_at < note_at, "rules must come before working notes");
+    assert!(note_at < memory_at, "approved notes must come before inferred evidence");
 
     let rules_heading = text.find("User rules").unwrap();
+    let notes_heading = text.find("Working notes").unwrap();
     let memories_heading = text.find("Recalled context").unwrap();
-    assert!(rules_heading < rule_at && rule_at < memories_heading);
+    assert!(rules_heading < rule_at && rule_at < notes_heading);
+    assert!(notes_heading < note_at && note_at < memories_heading);
 
     // The rule line itself carries no confidence marker. A rule is an instruction, not a
     // claim, and annotating it invites the model to weigh it against the evidence.
