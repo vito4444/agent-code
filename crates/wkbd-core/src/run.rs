@@ -65,6 +65,11 @@ pub struct RunEngine {
     /// repository shows up in the repository's own status and in globs, and then a task's
     /// `declared_paths` check starts seeing another task's files.
     pub worktree_root: PathBuf,
+    /// Which agent gets each task, when there is more than one that could.
+    ///
+    /// `None` when routing is not configured. A bandit over one arm is arithmetic with a fixed
+    /// answer, so the absence is the ordinary case rather than a degraded one.
+    pub routing: Option<Arc<crate::route::Routing>>,
     /// Runs a person asked to stop.
     ///
     /// In memory rather than read back from the status column on every check. The column is the
@@ -91,6 +96,18 @@ struct TaskResult {
     /// difference matters.
     commit: Option<String>,
     stop_reason: String,
+}
+
+/// How a task ended, when it did not simply fail.
+///
+/// An ownership violation is not an error. It is an answer: the graph was wrong about what this task
+/// would touch, and since declarations are what the schedule is derived from, the response is a new
+/// graph rather than a failed task.
+#[derive(Debug, Clone)]
+enum TaskOutcome {
+    /// Accepted. `None` when the agent changed nothing.
+    Produced(Option<String>),
+    LeftItsPaths { trigger: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,7 +269,17 @@ impl RunEngine {
             known_tests: Vec::new(),
         };
 
-        let graph = self.plan(&wf, goal, &ctx).await?;
+        let mut graph = self.plan(&wf, goal, &ctx).await?;
+
+        // Work that has already been accepted, kept across a redraft.
+        //
+        // A new graph does not invalidate a task that passed its own acceptance check under the old
+        // one, and throwing that away would make every ownership violation cost the whole run. A
+        // task is carried over only when the new graph still contains its id — a planner that
+        // dropped or renamed it has said it is no longer part of the plan.
+        let mut accepted: HashMap<String, Option<String>> = HashMap::new();
+        let mut attempt: u32 = 0;
+        let (validated, queue, failed) = loop {
         let validated = validate(&graph, &AnyTest)
             .map_err(|problems| anyhow!("the graph did not validate: {problems:?}"))?;
 
@@ -274,7 +301,7 @@ impl RunEngine {
             RunEvent::Planned {
                 tasks: summaries,
                 waves: validated.waves.clone(),
-                attempt: 0,
+                attempt,
             },
         )
         .await;
@@ -286,6 +313,21 @@ impl RunEngine {
         let mut commits: HashMap<String, String> = HashMap::new();
         let mut queue: Vec<QueueEntry> = Vec::new();
         let mut failed: Vec<String> = Vec::new();
+        let mut violations: Vec<(String, String)> = Vec::new();
+
+        // Everything carried over from a previous attempt counts as done before the waves start, so
+        // its dependents can proceed and it is not run a second time.
+        for (task_id, commit) in &accepted {
+            match commit {
+                Some(c) => {
+                    commits.insert(task_id.clone(), c.clone());
+                    queue.push(QueueEntry { task_id: task_id.clone(), commit: c.clone() });
+                }
+                None => {
+                    commits.insert(task_id.clone(), base_commit.clone());
+                }
+            }
+        }
 
         for wave in &validated.waves {
             // Checked at the wave boundary and again before each dispatch. A cancellation that is
@@ -303,6 +345,9 @@ impl RunEngine {
                     break;
                 }
                 let Some(task) = by_id.get(task_id.as_str()).copied() else { continue };
+                if accepted.contains_key(task_id) {
+                    continue;
+                }
 
                 // A task whose dependency failed cannot start: its starting point would be missing
                 // the work it was built on. Blocked rather than failed — nothing is wrong with the
@@ -351,7 +396,10 @@ impl RunEngine {
                     }
                 };
                 match outcome {
-                    Ok(Some(commit)) => {
+                    Ok(TaskOutcome::LeftItsPaths { trigger }) => {
+                        violations.push((task_id.clone(), trigger));
+                    }
+                    Ok(TaskOutcome::Produced(Some(commit))) => {
                         commits.insert(task_id.clone(), commit.clone());
                         queue.push(QueueEntry { task_id: task_id.clone(), commit });
                         self.emit(
@@ -364,7 +412,7 @@ impl RunEngine {
                         )
                         .await;
                     }
-                    Ok(None) => {
+                    Ok(TaskOutcome::Produced(None)) => {
                         // Accepted, changed nothing. It contributes no commit, so it is not in the
                         // merge queue, but it did not fail and its dependents can still start.
                         commits.insert(task_id.clone(), base_commit.clone());
@@ -393,6 +441,70 @@ impl RunEngine {
                 }
             }
         }
+
+        // What survives into the next attempt.
+        //
+        // A task that produced a commit keeps it; one that was accepted having changed nothing is
+        // remembered as such, so its dependents still start. A task that failed is left out, because
+        // the point of redrafting is to give it a different shape.
+        for task_id in commits.keys() {
+            if failed.contains(task_id) {
+                continue;
+            }
+            let commit = queue
+                .iter()
+                .find(|e| &e.task_id == task_id)
+                .map(|e| e.commit.clone());
+            accepted.entry(task_id.clone()).or_insert(commit);
+        }
+
+        if violations.is_empty() || attempt >= MAX_REPLANS || self.is_cancelled(&run_id) {
+            break (validated, queue, failed);
+        }
+
+        // The second point at which the model is allowed to decide anything.
+        //
+        // Handed the graph it produced and the violation as a problem, exactly as a rejected draft
+        // is. Re-deriving the schedule is the whole reason this is not just a wider declaration on
+        // the offending task: overlapping declarations are what force two tasks to run in sequence,
+        // so a task that took paths it did not declare may now belong in a different wave from the
+        // one it ran in.
+        attempt += 1;
+        for (task_id, trigger) in &violations {
+            self.emit(
+                &run_id,
+                RunEvent::Replanning {
+                    trigger: trigger.clone(),
+                    task_id: task_id.clone(),
+                    attempt,
+                },
+            )
+            .await;
+        }
+
+        let problems: Vec<String> = violations
+            .iter()
+            .map(|(task, trigger)| {
+                format!(
+                    "task {task:?} changed files it did not declare ({trigger}). Declared paths \
+                     decide which tasks may run at the same time, so widen this task's \
+                     declared_paths to cover what it really touches and move it if that now \
+                     overlaps another task."
+                )
+            })
+            .collect();
+
+        let previous = graph.clone();
+        let key = format!("replan/{attempt}");
+        let ctx_ref = &ctx;
+        let redrafted: DraftGraph = wf
+            .step(&key, || async move {
+                self.planner.redraft(goal, ctx_ref, &previous, &problems).await
+            })
+            .await
+            .context("redrafting after an ownership violation")?;
+        graph = redrafted;
+        };
 
         if self.is_cancelled(&run_id) {
             // No candidate is assembled for a cancelled run. Presenting one would invite a merge of
@@ -536,7 +648,7 @@ impl RunEngine {
         task: &DraftTask,
         base_commit: &str,
         dependency_commits: &HashMap<String, String>,
-    ) -> Result<Option<String>> {
+    ) -> Result<TaskOutcome> {
         let run_id = wf.run_id().to_string();
 
         self.emit(
@@ -596,19 +708,37 @@ impl RunEngine {
         .ok();
         let _ = wkbd_vcs::immutable::lock_paths(Path::new(&ws.path), &task.verify.immutable_paths);
 
+        // Which agent, and why it is recorded.
+        //
+        // A choice nobody can see is a choice nobody can question, and this one is made by a model of
+        // past outcomes rather than by the user. The decision id is carried to the reward below so
+        // that what the router learns is tied to this task's acceptance result and to nothing else.
+        let decision = match &self.routing {
+            Some(routing) => routing.choose(task, 0).await,
+            None => None,
+        };
+        let agent = decision
+            .as_ref()
+            .map(|d| d.arm.clone())
+            .unwrap_or_else(|| self.worker_agent.clone());
+
         self.emit(
             &run_id,
             RunEvent::TaskStateChanged {
                 task_id: task.id.clone(),
                 status: TaskStatus::Dispatched,
-                detail: None,
+                detail: Some(match &decision {
+                    Some(_) => format!("routed to {agent}"),
+                    None => format!("dispatched to {agent}"),
+                }),
             },
         )
         .await;
 
+        let agent_for_step = agent.clone();
         let result: TaskResult = wf
             .step(&format!("task/{}/dispatch", task.id), || async {
-                self.dispatch(task, &ws).await
+                self.dispatch(task, &ws, &agent_for_step).await
             })
             .await
             .with_context(|| format!("dispatching {}", task.id))?;
@@ -651,22 +781,13 @@ impl RunEngine {
         }
 
         if let Some(trigger) = check_ownership(Path::new(&ws.path), task, &ws.start_commit)? {
-            // The declaration is a scheduling input, so a task that wandered outside it invalidated
-            // the reasoning the schedule was built on. Reported and failed rather than tolerated;
-            // the replan path is where a graph gets a second chance.
-            self.emit(
-                &run_id,
-                RunEvent::Replanning {
-                    trigger: format!("{trigger:?}"),
-                    task_id: task.id.clone(),
-                    attempt: MAX_REPLANS,
-                },
-            )
-            .await;
-            return Err(anyhow!(
-                "{} changed files it did not declare: {trigger:?}",
-                task.id
-            ));
+            // A declaration is a scheduling input, not a note: overlapping declarations are what
+            // force two tasks to run in sequence. So a task that wandered outside its own has not
+            // just broken a rule, it has invalidated the reasoning the whole schedule was built on —
+            // which is why the answer is a new graph rather than a wider declaration for this task.
+            // Widening it here and carrying on would leave it running concurrently with whatever now
+            // shares the paths it took.
+            return Ok(TaskOutcome::LeftItsPaths { trigger: format!("{trigger:?}") });
         }
 
         self.emit(
@@ -730,6 +851,15 @@ impl RunEngine {
         )
         .await;
 
+        // The acceptance check is the whole signal. The strong results for learning from experience
+        // rest on having a verifiable one, and where there is none the reported benefit collapses to
+        // roughly nothing — so nothing here grades quality and no partial credit is invented for a
+        // task that failed in an interesting way.
+        if let (Some(routing), Some(decision)) = (&self.routing, &decision) {
+            let cost = routing.cost_of(&decision.arm);
+            routing.reward(&decision.id, record.passed, cost).await;
+        }
+
         if !record.passed {
             return Err(anyhow!(
                 "{} did not pass acceptance: {} did not start passing, {} regressed",
@@ -739,15 +869,20 @@ impl RunEngine {
             ));
         }
 
-        Ok(result.commit)
+        Ok(TaskOutcome::Produced(result.commit))
     }
 
     /// Runs one agent session in the task's worktree and commits what it produced.
-    async fn dispatch(&self, task: &DraftTask, ws: &WorkspaceRecord) -> Result<TaskResult> {
+    async fn dispatch(
+        &self,
+        task: &DraftTask,
+        ws: &WorkspaceRecord,
+        agent_id: &str,
+    ) -> Result<TaskResult> {
         let session = self
             .state
             .open_session(
-                &self.worker_agent,
+                agent_id,
                 &ws.path,
                 wkbd_agent::SessionPurpose::OrchestratorWorker,
             )

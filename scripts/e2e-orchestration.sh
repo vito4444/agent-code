@@ -89,6 +89,7 @@ WORK=$(mktemp -d)
 REPO="$WORK/project"
 STATE="$WORK/state"
 cleanup() {
+    [ -n "${DAEMON7_PID:-}" ] && kill "$DAEMON7_PID" 2> /dev/null
     [ -n "${DAEMON3_PID:-}" ] && kill "$DAEMON3_PID" 2> /dev/null
     [ -n "${DAEMON2_PID:-}" ] && kill "$DAEMON2_PID" 2> /dev/null
     [ -n "${DAEMON_PID:-}" ] && kill "$DAEMON_PID" 2> /dev/null
@@ -224,6 +225,8 @@ WORKER="$ROOT/target/debug/fake-acp-agent --profile worker"
 "$ROOT/target/debug/wkbd-core" \
     --state-dir "$STATE" --listen "127.0.0.1:$PORT" \
     --agent "worker=Worker=$WORKER" \
+    --agent "worker-b=Worker B=$WORKER" \
+    --agent-cost worker-b=4 \
     --worker-agent worker \
     --fixed-plan "$WORK/plan.json" \
     > "$WORK/daemon.log" 2>&1 &
@@ -356,6 +359,30 @@ PY
 check_ge "run events recorded" 18 "$(jq -r "$RUN | length" "$E")"
 
 echo
+echo "--- routing recorded a choice and learned from the outcome"
+# The first of the three learning loops. It is a cost control rather than a quality improvement, and
+# the only thing it is fed is the acceptance check — the strong results for learning from experience
+# rest on having a verifiable signal, and where there is none the reported benefit collapses to
+# roughly nothing.
+check_ge "a routing decision was recorded per task" 3 \
+    "$(count_rows "SELECT count(*) FROM routing_decisions")"
+# A decision that is never rewarded is a row nothing can learn from, which is the state this loop was
+# in before: complete, tested, and never fed.
+check "every decision was rewarded" "0" \
+    "$(count_rows "SELECT count(*) FROM routing_decisions WHERE reward IS NULL")"
+# Binary, from acceptance. Every task in this run passed, so every reward is a 1 — an invented
+# gradient would show up here as something else.
+check "the reward is the acceptance result and nothing else" "0" \
+    "$(count_rows "SELECT count(*) FROM routing_decisions WHERE reward NOT IN (0.0, 1.0)")"
+check_ge "the arms carry state a later run can start from" 1 \
+    "$(count_rows "SELECT count(*) FROM routing_arms")"
+# Which agent ran a task is in the log. A choice nobody can see is a choice nobody can question, and
+# this one is made by a model of past outcomes rather than by the user.
+check "the log says which agent each task went to" "true" \
+    "$(jq -r "$RUN | map(select(.event==\"task_state_changed\" and .status==\"dispatched\")) | all(.detail != null)" "$E")"
+
+
+echo
 echo "--- what the run taught the system"
 # Facts are written directly: they are inferred statements with a confidence and a provenance, and
 # everything that reads them treats them as evidence rather than as instruction.
@@ -466,6 +493,85 @@ check "the payload actually landed in the playbook" "1" \
 
 kill "$DAEMON2_PID" 2>/dev/null || true
 wait "$DAEMON2_PID" 2>/dev/null || true
+
+echo
+echo "--- a task that left its declared paths sends the graph back to the planner"
+# The model's second entry point, and the one that was reported but never taken. A declaration is a
+# scheduling input rather than a note — overlapping declarations are what force two tasks to run in
+# sequence — so a task that took paths it did not declare has invalidated the reasoning the whole
+# schedule was built on. Widening that one task's declaration and carrying on would leave it running
+# beside whatever now shares those paths, which is why the answer is a new graph.
+echo
+REPLAN_STATE="$WORK/replan"
+PORT4=$((PORT + 3))
+RREPO="$WORK/replanrepo"
+mkdir -p "$RREPO/src" "$RREPO/tests"
+(
+    cd "$RREPO" && git init -q . \
+        && git config user.email r@wkbd.invalid && git config user.name r
+    printf '#!/bin/sh\nok(){ echo "test $1 ... ok"; }\n[ -f src/a.rs ] && [ -f src/b.rs ] && ok unit::both\necho "test result: ok. done"\n' > tests/check.sh
+    chmod +x tests/check.sh
+    echo x > README.md
+    git add -A && git commit -q -m initial
+)
+# The first graph says the task touches src/a.rs. The agent writes src/a.rs *and* src/b.rs, so the
+# ownership check fails. The second declares both, and the run finishes.
+cat > "$WORK/replanplan.json" <<'REPLANPLAN'
+[
+ {"goal":"add a and b","tasks":[
+  {"id":"pair","title":"add both files",
+   "body":"Write them.\n\nWRITE src/a.rs <<<// a\n>>>\n\nWRITE src/b.rs <<<// b\n>>>",
+   "declared_paths":["src/a.rs"],"depends_on":[],
+   "verify":{"cmd":"sh tests/check.sh","must_pass":["unit::both"],
+             "immutable_paths":["tests/**"]}}]},
+ {"goal":"add a and b","tasks":[
+  {"id":"pair","title":"add both files",
+   "body":"Write them.\n\nWRITE src/a.rs <<<// a\n>>>\n\nWRITE src/b.rs <<<// b\n>>>",
+   "declared_paths":["src/a.rs","src/b.rs"],"depends_on":[],
+   "verify":{"cmd":"sh tests/check.sh","must_pass":["unit::both"],
+             "immutable_paths":["tests/**"]}}]}
+]
+REPLANPLAN
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$REPLAN_STATE" --listen "127.0.0.1:$PORT4" \
+    --agent "worker=Worker=$WORKER" --worker-agent worker \
+    --fixed-plan "$WORK/replanplan.json" > "$WORK/daemon4.log" 2>&1 &
+DAEMON7_PID=$!
+for _ in $(seq 1 80); do
+    curl -sf "http://127.0.0.1:$PORT4/api/health" > /dev/null 2>&1 && break
+    sleep 0.25
+done
+RRID=$(curl -sf -X POST "http://127.0.0.1:$PORT4/api/runs" -H 'content-type: application/json' \
+    -d "{\"goal\":\"add a and b\",\"project_root\":\"$RREPO\"}" | jq -r '.id // empty')
+for _ in $(seq 1 120); do
+    curl -sf "http://127.0.0.1:$PORT4/api/runs/$RRID" > "$WORK/replan.json" 2>/dev/null || true
+    S=$(jq -r '[.events[].payload.run|select(.event=="awaiting_merge" or .event=="finished" or .event=="merge_rejected")]|last|.event // empty' "$WORK/replan.json" 2>/dev/null)
+    [ -n "$S" ] && break
+    sleep 0.5
+done
+RE="$WORK/replan.json"
+RRUN='[.events[]|select(.payload.event=="run")|.payload.run]'
+
+check_ge "the violation was reported" 1 \
+    "$(jq -r "$RRUN | map(select(.event==\"replanning\")) | length" "$RE")"
+check "the trigger names the file the task took without declaring it" "true" \
+    "$(jq -r "$RRUN | map(select(.event==\"replanning\")) | .[0].trigger | test(\"b.rs\")" "$RE")"
+# The point. Reporting it and stopping is what happened before; a second `planned` event is the
+# graph actually coming back from the planner.
+check_ge "the graph was drafted twice" 2 \
+    "$(jq -r "$RRUN | map(select(.event==\"planned\")) | length" "$RE")"
+check "the second graph declares the path the first one missed" "true" \
+    "$(jq -r "$RRUN | map(select(.event==\"planned\")) | last | .tasks[0].declared_paths | index(\"src/b.rs\") != null" "$RE")"
+# And the run finishes rather than dying on the violation.
+check "the run reached a candidate on the second graph" "awaiting_merge" \
+    "$(jq -r "$RRUN | map(select(.event==\"awaiting_merge\" or .event==\"finished\" or .event==\"merge_rejected\")) | last | .event" "$RE")"
+check "the task passed once its declaration matched what it did" "true" \
+    "$(jq -r "$RRUN | map(select(.event==\"task_verified\")) | last | .passed" "$RE")"
+
+kill "$DAEMON7_PID" 2>/dev/null || true
+wait "$DAEMON7_PID" 2>/dev/null || true
+
 
 echo
 echo "--- cancelling a run stops the work, not just the status column"

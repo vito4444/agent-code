@@ -16,6 +16,7 @@ mod api;
 mod fs_bridge;
 mod learn;
 mod planner;
+mod route;
 mod run;
 mod runner;
 mod state;
@@ -65,6 +66,15 @@ struct Cli {
     /// Which agent drafts task graphs. Defaults to the worker agent.
     #[arg(long)]
     planner_agent: Option<String>,
+
+    /// Relative price of an agent, as `id=number`. Repeatable.
+    ///
+    /// Declared, never measured: the daemon is told a command line and nothing about what running it
+    /// costs. With none of these the router's price penalty multiplies by a constant and the
+    /// objective degenerates to "the arm most likely to pass" — which is a real limit rather than a
+    /// bug, since inventing prices would make it confidently optimise something nobody measured.
+    #[arg(long = "agent-cost", value_parser = parse_agent_cost)]
+    agent_costs: Vec<(String, f64)>,
 
     /// Read task graphs from this JSON file instead of asking a model.
     ///
@@ -233,6 +243,21 @@ async fn main() -> Result<()> {
             }),
         };
 
+        // Every agent is a candidate worker. Routing turns itself off when there is only one, so
+        // the common single-agent setup pays nothing for this.
+        let agent_ids: Vec<String> = app_state.agents.iter().map(|a| a.id.clone()).collect();
+        let costs: std::collections::BTreeMap<String, f64> =
+            cli.agent_costs.iter().cloned().collect();
+        let routing = match route::Routing::new(store.clone(), &agent_ids, &costs).await {
+            Ok(r) => Some(r),
+            Err(e) => {
+                // Routing is an optimisation. A router that will not start must not stop runs from
+                // happening; the configured worker does the work, as it would with no router at all.
+                tracing::error!(error = %e, "could not start the router; using the configured worker");
+                None
+            }
+        };
+
         let engine = Arc::new(run::RunEngine {
             store: store.clone(),
             state: app_state.clone(),
@@ -243,6 +268,7 @@ async fn main() -> Result<()> {
             // files.
             worktree_root: state_dir.join("worktrees"),
             cancelled: std::sync::Mutex::new(Default::default()),
+            routing,
         });
         app_state.set_runs(engine.clone());
 
@@ -340,6 +366,22 @@ fn parse_agents(specs: &[String]) -> Result<Vec<AgentSpec>> {
         });
     }
     Ok(out)
+}
+
+/// `id=1.5`.
+fn parse_agent_cost(raw: &str) -> Result<(String, f64), String> {
+    let (id, value) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("expected id=number, got {raw:?}"))?;
+    let cost: f64 = value
+        .parse()
+        .map_err(|_| format!("{value:?} is not a number"))?;
+    if !cost.is_finite() || cost <= 0.0 {
+        // A zero or negative price makes the penalty term meaningless rather than generous, and a
+        // NaN poisons every later comparison silently.
+        return Err(format!("a price must be a positive number, got {cost}"));
+    }
+    Ok((id.to_string(), cost))
 }
 
 /// Waits for either interrupt or terminate.

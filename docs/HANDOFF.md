@@ -70,11 +70,11 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace              # 281 tests
+cargo test --workspace              # 287 tests
 cd ui && pnpm vitest run            # 122 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 51 assertions, the conversation slice
-./scripts/e2e-orchestration.sh      # 52 assertions, one run start to finish
+./scripts/e2e-orchestration.sh      # 63 assertions, one run start to finish
 ```
 
 The two end-to-end checks are the ones to run before believing anything works. Every defect in
@@ -590,8 +590,13 @@ nothing appears outside it.
 - ~~**The approval queue has no interface.**~~ It has one, and the loop is closed end to end: a run
   raises a proposal with its evidence, the queue shows it, approving it applies it, and the playbook
   gains the bullet. Verified in the desktop shell as well as in the suite.
-- **Routing preferences are not updated from runs.** The bandit is complete and tested; nothing feeds
-  it the outcome of a real run, so the first of the three learning loops does not turn.
+- ~~**Routing preferences are not updated from runs.**~~ The loop turns: a task's agent is chosen by
+  the bandit when more than one is configured, the choice is recorded in the run log, and the
+  acceptance result is folded back in. What it cannot do yet is the *cost* half of its own objective:
+  an agent is a command line and the daemon is told nothing about what running it costs, so unless
+  somebody declares prices with `--agent-cost` every arm costs the same and the objective degenerates
+  to "the arm most likely to pass". Stated rather than papered over, because inventing prices would
+  produce a router confidently optimising something nobody measured.
 - **Distillation does not run.** Repeated successful patterns are not turned into reusable workflows,
   which is the third loop.
 - **A worker's permission requests are answered automatically.** An orchestrated worker has nobody
@@ -600,10 +605,12 @@ nothing appears outside it.
   and recorded instead. What constrains a worker is therefore the worktree, the path guard rooted at
   it, and the acceptance check — not the prompt. Treating the prompt as a boundary for an unattended
   session would be believing a check nobody performs.
-- **Replanning is reported but not performed.** A task that changes files it did not declare fails
-  the run and emits a `replanning` event naming the trigger. Sending that trigger back to the
-  planner for a new graph is not implemented, so the second entry point for the model exists in the
-  `Planner` trait and in the plan-rejection loop but not for ownership violations.
+- ~~**Replanning is reported but not performed.**~~ An ownership violation now sends the graph back
+  to the planner with the violation as a problem, and the run continues on the new graph, keeping the
+  commits of tasks that already passed. Re-deriving the whole schedule rather than widening the one
+  task's declaration is the point: overlapping declarations are what force two tasks to run in
+  sequence, so a task that took paths it did not declare may belong in a different wave than the one
+  it ran in.
 - **`known_tests` is always empty.** Enumerating a repository's tests means running its build, so
   the validator degrades to accepting any identifier rather than skipping validation. A task can
   therefore name an assertion that does not exist, and it will fail at acceptance instead of at
