@@ -8,9 +8,15 @@
  */
 
 import type { Rule } from '../components/rules/RulesScreen';
-import type { AgentSummary, RunSummary, SessionSummary } from './types';
+import type {
+  AgentSummary,
+  ProposalReview,
+  ProposalSummary,
+  RunSummary,
+  SessionSummary,
+} from './types';
 
-export type { AgentSummary, SessionSummary };
+export type { AgentSummary, ProposalReview, ProposalSummary, SessionSummary };
 
 const base = '/api';
 
@@ -42,6 +48,36 @@ async function accepted(path: string, init?: RequestInit): Promise<void> {
     const body = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${body}`);
   }
+}
+
+export async function listProposals(): Promise<ProposalSummary[]> {
+  const body = await json<{ proposals: ProposalSummary[] }>('/proposals');
+  return body.proposals;
+}
+
+export function reviewProposal(id: string): Promise<ProposalReview> {
+  return json(`/proposals/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Approves against the exact content the reviewer saw.
+ *
+ * `contentHash` is not optional and is not read back from the server here. An approval that does not
+ * say what it approved cannot be checked against what is there now, which is the whole mechanism.
+ */
+export function approveProposal(
+  id: string,
+  contentHash: string,
+  typed?: string,
+): Promise<unknown> {
+  return json(`/proposals/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ content_hash: contentHash, typed: typed ?? null }),
+  });
+}
+
+export function rejectProposal(id: string): Promise<void> {
+  return accepted(`/proposals/${encodeURIComponent(id)}/reject`, { method: 'POST' });
 }
 
 export function listAgents(): Promise<AgentSummary[]> {

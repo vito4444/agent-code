@@ -2202,3 +2202,252 @@
   font-size: var(--chat-font-size-s);
   color: var(--fg-muted);
 }
+
+/* ── The approval queue ──────────────────────────────────────────────────────────────────────
+   Set like the rest of the reading surfaces, because deciding whether to let the system change its
+   own instructions is a reading task before it is a clicking one. */
+
+.proposals {
+  max-width: 780px;
+  margin: var(--space-32) auto;
+  padding: 0 var(--space-16);
+  font-family: var(--font-serif);
+}
+
+.proposals h1 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-xxl);
+  font-weight: 600;
+}
+
+.proposals-lede {
+  margin: 0 0 var(--space-24);
+  font-size: var(--chat-font-size-m);
+  line-height: var(--prose-line-height);
+  color: var(--fg-muted);
+}
+
+.proposals-empty {
+  margin: 0;
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-subtle);
+}
+
+.proposals-error {
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  font-size: var(--chat-font-size-s);
+}
+
+.proposal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  margin-top: var(--space-8);
+  padding: var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-default);
+  cursor: pointer;
+  text-align: left;
+}
+
+.proposal-row[data-open='true'] {
+  border-color: var(--fg-accent);
+}
+
+.proposal-kind {
+  font-weight: 600;
+}
+
+.proposal-scope {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.proposal-scope > bdi {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+/* Raised risk is stated on the row, because the reviewer decides which one to open from here. */
+.proposal-risk {
+  flex: 0 0 auto;
+  padding: 0 var(--space-8);
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-full);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+}
+
+.proposal-detail {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--border-default);
+  border-top: none;
+  border-radius: 0 0 var(--radius-medium) var(--radius-medium);
+  background: var(--bg-default);
+}
+
+.proposal-detail h2 {
+  margin: var(--space-16) 0 var(--space-8);
+  font-size: var(--chat-font-size-m);
+  font-weight: 600;
+}
+
+.proposal-detail h2:first-child {
+  margin-top: 0;
+}
+
+.proposal-body {
+  margin: 0;
+  padding: var(--space-12);
+  border-radius: var(--radius-medium);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  line-height: var(--chat-line-height-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What was taken out. Attention-coloured because it is the part a reviewer would otherwise never
+   know to look for. */
+.proposal-hidden {
+  margin-top: var(--space-12);
+  padding: var(--space-12);
+  border-left: var(--border-thick) solid var(--fg-attention);
+  border-radius: var(--radius-small);
+  background: var(--bg-attention-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.proposal-hidden h3 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--chat-font-size-xs);
+  font-weight: 600;
+}
+
+.proposal-hidden ul,
+.proposal-evidence ul {
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-16);
+}
+
+.proposal-evidence {
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-muted);
+}
+
+.proposal-runs {
+  margin: var(--space-8) 0 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.proposal-confirm {
+  margin-top: var(--space-16);
+  padding: var(--space-12);
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-medium);
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+}
+
+.proposal-confirm input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-small);
+  background: var(--bg-default);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-default);
+}
+
+.proposal-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+  font-family: var(--font-sans);
+}
+
+.proposal-actions button {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-16);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+}
+
+.proposal-actions button.quiet {
+  border: var(--border-thin) solid var(--border-default);
+  background: var(--bg-default);
+  color: var(--fg-muted);
+}
+
+.proposal-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.proposal-hash {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+/* What the proposal asks for, in sentences. The primary reading, with the stored bytes underneath
+   it rather than instead of it. */
+.proposal-changes {
+  margin: 0;
+  padding-left: var(--space-20);
+  font-size: var(--chat-font-size-m);
+  line-height: var(--prose-line-height);
+}
+
+.proposal-raw {
+  margin-top: var(--space-12);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.proposal-raw summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.proposal-raw .proposal-body {
+  margin-top: var(--space-8);
+}

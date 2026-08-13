@@ -322,6 +322,60 @@ export interface SessionSummary {
  * its base commit — is folded from the run's events, because a summary that duplicated them
  * would be a second source of truth able to disagree with the log about what happened.
  */
+/** A row in the approval queue. Deliberately without a body: see `ProposalQueue`. */
+export interface ProposalSummary {
+  id: string;
+  kind: string;
+  scope: string;
+  risk: 'normal' | 'elevated';
+  created_ms: number;
+  requires_distinct_confirmation: boolean;
+}
+
+/** One invisible character that was taken out before the text was shown. */
+export interface HiddenCharacter {
+  codepoint: string;
+  line: number;
+  column: number;
+  kind: string;
+}
+
+/** A proposal prepared for somebody to read and decide on. */
+export interface ProposalReview {
+  id: string;
+  kind: string;
+  scope: string;
+  risk: 'normal' | 'elevated';
+  /**
+   * The hash of the bytes this text came from.
+   *
+   * Handed back with an approval so the daemon can check it against what is on disk at that moment.
+   * An edit landing between rendering and pressing invalidates the press rather than being carried
+   * along by it.
+   */
+  content_hash: string;
+  /**
+   * What the proposal is asking for, in sentences.
+   *
+   * A rendering of the stored bytes, never a substitute for them: `body_for_human` is still here and
+   * the interface keeps it one click away, and the hash is over the bytes rather than over this. It
+   * exists because the stored body is a serialised payload, and asking somebody to dig one sentence
+   * out of a line of JSON is how an approval gets given to something nobody read.
+   */
+  changes: string[];
+  /** Sanitised, and exactly what the hash covers. */
+  body_for_human: string;
+  hidden_summary: string;
+  hidden: HiddenCharacter[];
+  requires_distinct_confirmation: boolean;
+  confirmation_phrase: string | null;
+  evidence: {
+    supporting_runs: string[];
+    verified_signals: string[];
+    note: string;
+  };
+}
+
 /** An agent the daemon was configured with. */
 export interface AgentSummary {
   id: string;

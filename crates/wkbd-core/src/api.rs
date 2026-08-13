@@ -263,6 +263,14 @@ async fn review_proposal(
         "scope": p.scope,
         "risk": p.risk.as_str(),
         "content_hash": p.content_hash,
+        // What it is asking for, in sentences.
+        //
+        // The stored body is the serialised payload, and showing that alone made the reviewer dig
+        // one sentence out of a line of JSON — which is the shape of an approval given to something
+        // nobody read. This is a rendering of the same bytes and never a substitute for them:
+        // `body_for_human` is still sent, the interface keeps it one click away, and the hash is
+        // still over the bytes rather than over this.
+        "changes": describe_payload(&p.body_for_human),
         "body_for_human": p.body_for_human,
         "hidden_summary": p.hidden_summary,
         // Each removal located precisely, because "we removed 3 invisible characters" is not
@@ -282,6 +290,59 @@ async fn review_proposal(
             "note": p.evidence.note,
         },
     })))
+}
+
+/// Turns a serialised proposal payload into lines a person can read.
+///
+/// Falls back to the raw text when it cannot be parsed rather than inventing a summary. A proposal
+/// whose payload this does not recognise is exactly the one where a confident-looking summary would
+/// be most misleading, and the exact bytes are on screen either way.
+fn describe_payload(body: &str) -> Vec<String> {
+    use wkbd_evolve::proposals::{PolicySetting, ProposalPayload};
+    let Ok(payload) = serde_json::from_str::<ProposalPayload>(body) else {
+        return vec![body.to_string()];
+    };
+    match payload {
+        ProposalPayload::Playbook { deltas, .. } => deltas
+            .iter()
+            .map(|d| match d {
+                wkbd_evolve::PlaybookDelta::Add { body, .. } => {
+                    format!("Add to the playbook: {body}")
+                }
+                wkbd_evolve::PlaybookDelta::Update { id, set_body, helpful, harmful, .. } => {
+                    match set_body {
+                        Some(text) => format!("Reword note {}: {text}", &id[..id.len().min(8)]),
+                        // Counters rather than text. Worth spelling out, because "update" on its own
+                        // reads as an edit and this one changes nothing anybody wrote.
+                        None => format!(
+                            "Credit note {} with {helpful} helpful and {harmful} harmful",
+                            &id[..id.len().min(8)]
+                        ),
+                    }
+                }
+                wkbd_evolve::PlaybookDelta::Deprecate { id, reason } => format!(
+                    "Retire note {}: {reason}",
+                    &id[..id.len().min(8)]
+                ),
+            })
+            .collect(),
+        ProposalPayload::Workflow { name, steps, .. } => {
+            let mut out = vec![format!("Remember a workflow called {name:?}, with these steps:")];
+            out.extend(steps.iter().enumerate().map(|(i, s)| format!("{}. {s}", i + 1)));
+            out
+        }
+        ProposalPayload::Policy { setting } => vec![match setting {
+            PolicySetting::RoutingCostWeight { value } => {
+                format!("Set the router's price penalty to {value}")
+            }
+            PolicySetting::RoutingQualityTarget { value } => {
+                format!("Set the router's quality floor to {value}")
+            }
+            PolicySetting::ApprovalsPerDay { value } => format!(
+                "Allow {value} proposals a day. This changes the machinery that asks for approval."
+            ),
+        }],
+    }
 }
 
 #[derive(Deserialize)]
@@ -308,7 +369,24 @@ async fn approve_proposal(
             // A stale hash and a wrong phrase are both refusals of this request rather than server
             // faults, and the message says which.
             .map_err(|e| ApiError::conflict(&e.to_string()))?;
-    Ok(Json(json!({ "id": approved.id, "status": approved.status.as_str() })))
+
+    // Applied in the same request that approved it.
+    //
+    // Two steps, one act. Recording the approval and never running it is what happened first, and
+    // from outside it is indistinguishable from the loop working: the queue empties, the proposal
+    // says approved, and nothing changed. Worse than not having the queue, because it looks closed.
+    //
+    // Apply re-checks the hash itself before interpreting the body, and voids the approval rather
+    // than proceeding if the bytes moved in between — so this is not the check, it is the caller.
+    let applied = wkbd_evolve::proposals::apply(&state.store, &id)
+        .await
+        .map_err(|e| ApiError::conflict(&e.to_string()))?;
+
+    Ok(Json(json!({
+        "id": approved.id,
+        "status": "applied",
+        "applied": format!("{applied:?}"),
+    })))
 }
 
 async fn reject_proposal(

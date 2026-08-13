@@ -47,6 +47,22 @@ check_ge() {
 
 # Reads one number out of the daemon's database. Opened read-only: the daemon is still running, and a
 # writable handle from a second process is how a test corrupts the thing it is measuring.
+# As count_rows, for a query returning text.
+count_text() {
+    python3 - "$STATE" "$1" <<'SQLPY'
+import sqlite3, glob, os, sys
+for p in glob.glob(os.path.join(sys.argv[1], "*.db")):
+    try:
+        c = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+        print(c.execute(sys.argv[2]).fetchone()[0])
+        break
+    except Exception:
+        continue
+else:
+    print("")
+SQLPY
+}
+
 count_rows() {
     python3 - "$STATE" "$1" <<'SQLPY'
 import sqlite3, glob, os, sys
@@ -439,6 +455,14 @@ OK_CODE=$(curl -s -o "$WORK/approved.json" -w '%{http_code}' -X POST \
 check "approving against the content that was shown succeeds" "200" "$OK_CODE"
 check "the queue is empty afterwards" "0" \
     "$(curl -sf "http://127.0.0.1:$PORT2/api/proposals" | jq -r '.proposals | length')"
+# Approving has to *do* something. Recording the approval and never running it is what happened
+# first, and from outside it is indistinguishable from the loop working: the queue empties, the row
+# says approved, and nothing changed. That is worse than not having the queue, because it looks
+# closed.
+check "approving applied it rather than only recording it" "applied" \
+    "$(STATE="$FAIL_STATE" count_text "SELECT status FROM proposals LIMIT 1")"
+check "the payload actually landed in the playbook" "1" \
+    "$(STATE="$FAIL_STATE" count_rows "SELECT count(*) FROM playbook")"
 
 kill "$DAEMON2_PID" 2>/dev/null || true
 wait "$DAEMON2_PID" 2>/dev/null || true

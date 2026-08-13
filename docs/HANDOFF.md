@@ -70,11 +70,11 @@ cd ui && pnpm dev     # proxies /api to 127.0.0.1:8787, WebSocket included
 ### Checks
 
 ```bash
-cargo test --workspace              # 280 tests
-cd ui && pnpm vitest run            # 111 tests
+cargo test --workspace              # 281 tests
+cd ui && pnpm vitest run            # 122 tests
 ./scripts/m0-mergetree.sh           # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh              # 51 assertions, the conversation slice
-./scripts/e2e-orchestration.sh      # 50 assertions, one run start to finish
+./scripts/e2e-orchestration.sh      # 52 assertions, one run start to finish
 ```
 
 The two end-to-end checks are the ones to run before believing anything works. Every defect in
@@ -445,6 +445,26 @@ It now compares the two elements to each other.
 `worktrees/<run>/<task>`, and the sidebar truncated the path from the right — which is where the
 distinguishing part is. All three read `/home/me/.local/state/wkbd/worktre…`.
 
+### Found by using it in the desktop rather than reading about it
+
+**Approving a proposal recorded the approval and never ran it.** `apply` existed, was tested, and had
+no caller. Clicking Approve emptied the queue and set the row to `approved`, and nothing happened —
+which from outside is indistinguishable from the loop working, and is worse than not having the queue
+at all, because it looks closed. Approval and application are one request now. This was found by
+clicking the button and then reading the database, not by reading the code.
+
+**Task branch names were not scoped to the run.** They were `wkbd/<task id>`, and task ids come from a
+planner reading a goal, so the common ones — `docs`, `tests`, `base-module` — recur across runs. A
+second run against the same repository died at its first worktree with a git error about an existing
+branch: during setup, which is nowhere anybody would look for a planning problem. Branches carry the
+run now. Found by running a second goal against a repository that had already had one, which no test
+did.
+
+**The review body was serialised JSON.** The stored body is the payload, so a reviewer had to dig one
+sentence of English out of a line of `{"payload":"playbook","deltas":[...]}` — which is the shape of an
+approval given to something nobody read. It renders as sentences now, with the exact bytes one
+disclosure away, because the hash covers the bytes and not the rendering.
+
 ### Found by looking at screenshots a second time
 
 **A permission request outlived the turn that asked it.** The waiter stayed registered for its own
@@ -567,10 +587,9 @@ nothing appears outside it.
 - **A virtualized transcript.** Collapsing by default keeps the node count manageable at
   reachable lengths. Virtualization has to be designed together with end-anchored scrolling and
   the sticky prompt header.
-- **The approval queue has no interface.** The endpoints exist and are asserted end to end
-  (`/api/proposals`, review, approve, reject), but nothing in the interface renders them, so in
-  practice a proposal is raised and nobody sees it. The rail holds — nothing takes effect — but a
-  rail nobody can open is a rail that turns the feature off rather than gating it.
+- ~~**The approval queue has no interface.**~~ It has one, and the loop is closed end to end: a run
+  raises a proposal with its evidence, the queue shows it, approving it applies it, and the playbook
+  gains the bullet. Verified in the desktop shell as well as in the suite.
 - **Routing preferences are not updated from runs.** The bandit is complete and tested; nothing feeds
   it the outcome of a real run, so the first of the three learning loops does not turn.
 - **Distillation does not run.** Repeated successful patterns are not turned into reusable workflows,

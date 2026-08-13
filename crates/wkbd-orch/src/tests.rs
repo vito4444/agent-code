@@ -338,7 +338,7 @@ fn a_dependency_edge_puts_the_dependency_output_in_the_dependent_worktree() {
 
     let dependent = task("dependent", &["x", "y"], &["c.txt"]);
     let workspace =
-        prepare_workspace(&repo, &worktrees, &dependent, &base, &commits).expect("prepared");
+        prepare_workspace(&repo, &worktrees, "run-0001", &dependent, &base, &commits).expect("prepared");
 
     assert_eq!(
         std::fs::read_to_string(workspace.path.join("a.txt")).unwrap(),
@@ -359,6 +359,7 @@ fn preparing_a_workspace_does_not_disturb_any_existing_worktree() {
     prepare_workspace(
         &repo,
         &dir.path().join("wt"),
+        "run-0001",
         &task("d", &["x", "y"], &[]),
         &base,
         &commits,
@@ -378,6 +379,7 @@ fn a_dependency_that_has_not_finished_is_refused_rather_than_guessed_at() {
     let err = prepare_workspace(
         &repo,
         &dir.path().join("wt"),
+        "run-0001",
         &task("d", &["x", "missing"], &[]),
         &base,
         &commits,
@@ -395,8 +397,8 @@ fn a_branch_already_checked_out_elsewhere_is_refused() {
     let worktrees = dir.path().join("wt");
     let t = task("solo", &[], &[]);
 
-    prepare_workspace(&repo, &worktrees, &t, &base, &HashMap::new()).unwrap();
-    let err = prepare_workspace(&repo, &worktrees.join("second"), &t, &base, &HashMap::new())
+    prepare_workspace(&repo, &worktrees, "run-0001", &t, &base, &HashMap::new()).unwrap();
+    let err = prepare_workspace(&repo, &worktrees.join("second"), "run-0001", &t, &base, &HashMap::new())
         .unwrap_err();
     assert!(matches!(err, PrepareError::BranchBusy { .. }));
 }
@@ -521,7 +523,7 @@ fn a_task_that_touches_undeclared_files_is_caught_afterwards() {
     let (dir, repo, base, _x, _y) = repo_with_branches();
     let worktrees = dir.path().join("wt");
     let t = task("scoped", &[], &["a.txt"]);
-    let workspace = prepare_workspace(&repo, &worktrees, &t, &base, &HashMap::new()).unwrap();
+    let workspace = prepare_workspace(&repo, &worktrees, "run-0001", &t, &base, &HashMap::new()).unwrap();
 
     // Within declaration.
     std::fs::write(workspace.path.join("a.txt"), "changed\n").unwrap();
@@ -679,4 +681,44 @@ fn an_acceptance_command_that_hangs_is_killed() {
     .run(dir.path(), "patch")
     .unwrap_err();
     assert!(format!("{err}").contains("timed out"));
+}
+
+/// Two runs against one repository, both with a task called `docs`.
+///
+/// Found by running a second goal against a repository that had already had one. Task ids come from
+/// a planner reading the goal, so the common ones — `docs`, `tests`, `base-module` — recur, and named
+/// by task alone the second run died at its first worktree with a git error about an existing branch.
+/// It failed during setup, which is nowhere a reader would think to look for a planning problem.
+#[test]
+fn two_runs_can_use_the_same_task_id_in_one_repository() {
+    let (dir, repo, base, _x, _y) = repo_with_branches();
+    let worktrees = dir.path().join("wt");
+    let t = task("docs", &[], &[]);
+
+    let first = prepare_workspace(
+        &repo,
+        &worktrees.join("run-a"),
+        "aaaaaaaa-1111",
+        &t,
+        &base,
+        &HashMap::new(),
+    )
+    .expect("the first run prepares");
+
+    let second = prepare_workspace(
+        &repo,
+        &worktrees.join("run-b"),
+        "bbbbbbbb-2222",
+        &t,
+        &base,
+        &HashMap::new(),
+    )
+    .expect("the second run must not collide with the first");
+
+    assert_ne!(first.branch, second.branch, "{}", first.branch);
+    assert!(first.branch.contains("docs") && second.branch.contains("docs"));
+    // The run is in the name, so `git branch` in the repository afterwards says which run each
+    // branch belongs to without anybody having to look it up.
+    assert!(first.branch.contains("aaaaaaaa"), "{}", first.branch);
+    assert!(second.branch.contains("bbbbbbbb"), "{}", second.branch);
 }

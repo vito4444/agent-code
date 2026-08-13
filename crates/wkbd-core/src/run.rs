@@ -556,9 +556,11 @@ impl RunEngine {
         let task2 = task.clone();
         let base2 = base_commit.to_string();
         let deps2 = dependency_commits.clone();
+        let run_for_branch = run_id.clone();
         let ws: WorkspaceRecord = wf
             .step(&format!("task/{}/workspace", task.id), || async move {
-                let w = prepare_workspace(&repo2, &ws_root, &task2, &base2, &deps2)?;
+                let w =
+                    prepare_workspace(&repo2, &ws_root, &run_for_branch, &task2, &base2, &deps2)?;
                 Ok(WorkspaceRecord {
                     task_id: w.task_id,
                     branch: w.branch,

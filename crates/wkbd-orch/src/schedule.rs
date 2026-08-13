@@ -88,6 +88,7 @@ pub struct TaskWorkspace {
 pub fn prepare_workspace(
     repo: &Path,
     worktree_root: &Path,
+    run_id: &str,
     task: &DraftTask,
     base_commit: &str,
     dependency_commits: &HashMap<String, String>,
@@ -129,7 +130,14 @@ pub fn prepare_workspace(
         }
     };
 
-    let branch = format!("wkbd/{}", task.id);
+    // Scoped to the run, not just to the task.
+    //
+    // Task ids are chosen by a planner from the goal, so two runs against one repository routinely
+    // produce the same ones — `docs`, `tests`, `base-module`. Named by task alone, the second run
+    // fails at its first worktree because the branch already exists, and it fails during setup with
+    // a git error rather than anywhere a reader would think to look. Found by running two goals
+    // against the same repository, which no test did.
+    let branch = format!("wkbd/{}/{}", &run_id[..run_id.len().min(8)], task.id);
     let path = worktree_root.join(&task.id);
 
     // Git refuses to check out a branch that another worktree already has. That refusal is
