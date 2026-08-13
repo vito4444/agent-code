@@ -490,6 +490,116 @@ kill "$DAEMON3_PID" 2>/dev/null || true
 wait "$DAEMON3_PID" 2>/dev/null || true
 rm -rf "$FS_STATE"
 
+# ---------------------------------------------------------------- attachments
+#
+# The whole point of reading promptCapabilities is that the same mention has to become a
+# different block for a different agent. Two agents in one daemon, one declaring
+# embeddedContext and one declaring nothing, and the assertion is what the agent says it
+# received rather than what we logged sending: only the agent can report what crossed the pipe.
+echo
+echo "attachments"
+AT_STATE=$(mktemp -d)
+AT_PORT=$((PORT + 3))
+AT_PROJECT="$AT_STATE/project"
+mkdir -p "$AT_PROJECT/src"
+printf 'fn main() { println!("hi"); }\n' > "$AT_PROJECT/src/main.rs"
+printf 'node_modules/\n' > "$AT_PROJECT/.gitignore"
+mkdir -p "$AT_PROJECT/node_modules"
+printf 'junk\n' > "$AT_PROJECT/node_modules/main.rs"
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$AT_STATE" \
+    --listen "127.0.0.1:$AT_PORT" \
+    --agent "rich=Rich Agent=$ROOT/target/debug/fake-acp-agent --profile rich" \
+    --agent "spartan=Spartan Agent=$ROOT/target/debug/fake-acp-agent --profile spartan" \
+    > "$AT_STATE/daemon.log" 2>&1 &
+DAEMON4_PID=$!
+for _ in $(seq 1 60); do
+    curl -sf "http://127.0.0.1:$AT_PORT/api/health" > /dev/null 2>&1 && break
+    sleep 0.2
+done
+
+attach_turn() {
+    # $1 agent id, $2 mention path. Echoes the flattened answer text.
+    local agent="$1" path="$2" sid
+    sid=$(curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions" \
+        -H 'content-type: application/json' \
+        -d "{\"agent_id\":\"$agent\",\"project_root\":\"$AT_PROJECT\"}" | jq -r '.id // empty')
+    [ -z "$sid" ] && { echo ""; return; }
+    echo "$sid" > "$AT_STATE/last-sid"
+    curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions/$sid/prompt" \
+        -H 'content-type: application/json' \
+        -d "{\"text\":\"look at @$path\",\"mentions\":[\"$path\"]}" > /dev/null 2>&1
+    for _ in $(seq 1 100); do
+        PORT="$AT_PORT" python3 "$ROOT/scripts/read-events.py" "$AT_PORT" 0 1.0 \
+            > "$AT_STATE/ev.json" 2>/dev/null || echo '[]' > "$AT_STATE/ev.json"
+        local ended
+        ended=$(jq -r --arg s "$sid" \
+            '[.[]|select(.session_id==$s and .payload.event=="turn_ended")]|length' \
+            "$AT_STATE/ev.json" 2>/dev/null || echo 0)
+        [ "$ended" != "0" ] && break
+        sleep 0.2
+    done
+    jq -r --arg s "$sid" \
+        '[.[]|select(.session_id==$s and .payload.event=="segment_chunk")]|map(.payload.text)|join("")' \
+        "$AT_STATE/ev.json"
+}
+
+PATHS=$(curl -sf "http://127.0.0.1:$AT_PORT/api/health" > /dev/null 2>&1; echo ok)
+RICH_SID=$(curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions" \
+    -H 'content-type: application/json' \
+    -d "{\"agent_id\":\"rich\",\"project_root\":\"$AT_PROJECT\"}" | jq -r '.id // empty')
+check "an agent that takes embedded context says so" "true" \
+    "$(curl -sf "http://127.0.0.1:$AT_PORT/api/sessions" | jq -r --arg s "$RICH_SID" \
+        '[.[]|select(.id==$s)]|first.prompt_capabilities.embedded_context')"
+check "an agent that declares nothing is not assumed to" "false" \
+    "$(curl -sf -X POST "http://127.0.0.1:$AT_PORT/api/sessions" \
+        -H 'content-type: application/json' \
+        -d "{\"agent_id\":\"spartan\",\"project_root\":\"$AT_PROJECT\"}" \
+        | jq -r '.prompt_capabilities.embedded_context')"
+
+COMPLETIONS=$(curl -sf "http://127.0.0.1:$AT_PORT/api/sessions/$RICH_SID/paths?q=main" || echo '[]')
+check "completion finds the file" "src/main.rs" "$(echo "$COMPLETIONS" | jq -r 'first.path // "none"')"
+check "completion skips what the repository ignores" "0" \
+    "$(echo "$COMPLETIONS" | jq -r '[.[]|select(.path|startswith("node_modules"))]|length')"
+
+RICH_ANSWER=$(attach_turn rich "src/main.rs")
+case "$RICH_ANSWER" in
+    *"resource main.rs"*) printf 'ok   %-64s %s\n' "the agent received the file's contents" "resource" ;;
+    *) printf 'FAIL %-64s %s\n' "the agent received the file's contents" "$RICH_ANSWER"; FAILED=1 ;;
+esac
+
+SPARTAN_ANSWER=$(attach_turn spartan "src/main.rs")
+case "$SPARTAN_ANSWER" in
+    *"resource_link main.rs"*) printf 'ok   %-64s %s\n' "an agent that cannot embed got a link" "resource_link" ;;
+    *) printf 'FAIL %-64s %s\n' "an agent that cannot embed got a link" "$SPARTAN_ANSWER"; FAILED=1 ;;
+esac
+
+# The transcript has to say which of the two happened, or the difference is invisible.
+SPARTAN_SID=$(cat "$AT_STATE/last-sid")
+check "the transcript records that it degraded to a link" "agent-cannot-embed" \
+    "$(jq -r --arg s "$SPARTAN_SID" \
+        '[.[]|select(.session_id==$s and .payload.event=="turn_started")]|last.payload.attachments[0].degraded' \
+        "$AT_STATE/ev.json")"
+check "and records what it was sent as" "link" \
+    "$(jq -r --arg s "$SPARTAN_SID" \
+        '[.[]|select(.session_id==$s and .payload.event=="turn_started")]|last.payload.attachments[0].sent_as' \
+        "$AT_STATE/ev.json")"
+
+# The composer is the softer target of the two paths into the filesystem: the path arrives as
+# a string over HTTP. It must be refused with the same boundary as fs/read_text_file.
+ESCAPE=$(curl -s -o "$AT_STATE/escape.json" -w '%{http_code}' \
+    -X POST "http://127.0.0.1:$AT_PORT/api/sessions/$RICH_SID/prompt" \
+    -H 'content-type: application/json' \
+    -d '{"text":"read this","mentions":["../../../../etc/passwd"]}')
+check "boundary: a mention cannot escape the project root" "400" "$ESCAPE"
+check "boundary: and the refusal names the path" "true" \
+    "$(jq -r '.error|test("etc/passwd")' "$AT_STATE/escape.json" 2>/dev/null || echo false)"
+
+kill "$DAEMON4_PID" 2>/dev/null || true
+wait "$DAEMON4_PID" 2>/dev/null || true
+rm -rf "$AT_STATE"
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "vertical slice works end to end"

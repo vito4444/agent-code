@@ -80,6 +80,29 @@ fn substitute_root(params: &Value, cwd: &str) -> Value {
     }
 }
 
+/// Names the non-text blocks in a prompt, e.g. `resource src/main.rs, image shot.png`.
+///
+/// Text blocks are left out: every prompt has them and listing them would bury the part that
+/// is worth checking.
+fn describe_blocks(blocks: &[serde_json::Value]) -> String {
+    let mut out = Vec::new();
+    for b in blocks {
+        let kind = b.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let named = match kind {
+            "resource" => b.get("resource").and_then(|r| r.get("uri")).and_then(|u| u.as_str()),
+            "resource_link" | "image" => b.get("uri").and_then(|u| u.as_str()),
+            _ => None,
+        };
+        if let Some(uri) = named {
+            let tail = uri.rsplit('/').next().unwrap_or(uri);
+            out.push(format!("{kind} {tail}"));
+        } else if kind == "image" {
+            out.push("image".to_string());
+        }
+    }
+    out.join(", ")
+}
+
 fn loose_bool(s: &str) -> Result<bool, String> {
     match s.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
@@ -276,9 +299,8 @@ async fn main() -> Result<()> {
             "session/prompt" => {
                 let sid =
                     params.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let prompt_text = params
-                    .get("prompt")
-                    .and_then(|p| p.as_array())
+                let blocks = params.get("prompt").and_then(|p| p.as_array());
+                let prompt_text = blocks
                     .map(|blocks| {
                         blocks
                             .iter()
@@ -287,6 +309,16 @@ async fn main() -> Result<()> {
                             .join(" ")
                     })
                     .unwrap_or_default();
+
+                // What the client actually attached, reported back in the answer. This is the
+                // only assertion about attachments that proves anything: our own logs say what
+                // we meant to send, and only the agent can say what crossed the pipe.
+                let received = blocks.map(|b| describe_blocks(b)).unwrap_or_default();
+                let prompt_text = if received.is_empty() {
+                    prompt_text
+                } else {
+                    format!("{prompt_text}\n[received {received}]")
+                };
 
                 let cwd = state
                     .lock()
