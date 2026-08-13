@@ -241,6 +241,71 @@ the two bugs.
 was zero — indistinguishable from an agent that reports nothing, and enough to hide whether the
 per-turn token line worked at all.
 
+## The protocol log, and what it was hiding
+
+`protocol-log.png` is the last screen to get a capture, and taking one is how the rest of this
+section happened: a screen nobody has looked at is where a defect sits undisturbed.
+
+Three of them were sitting in it, all introduced by attachments.
+
+**The buffer bounded the number of frames and nothing bounded their size.** Which was the whole
+story until a prompt could carry an embedded resource — 256 kB in one frame, five thousand frames
+kept, a gigabyte held to show somebody the shape of a JSON message. Frames are clipped to 4 kB,
+which keeps the method, the parameters and the front of any payload.
+
+**Four kilobytes is the right amount to hold and the wrong amount to show.** It is about forty
+lines, so after the first fix one prompt still filled the viewport and buried every frame around
+it. A frame shows its first 420 characters and opens on request; the rest is already there.
+
+**It refetched the whole log every second**, whether or not anything had changed, on the screen
+somebody opens when an agent is already misbehaving. Frames carry a monotonic sequence — not the
+buffer index, which points at a different frame after the ring drops a thousand entries — and the
+poll asks for what comes after the newest it has.
+
+What the screen is worth having for is visible in the capture: the handshake, with
+`promptCapabilities` in the agent's reply, and the prompt below it carrying `"type":"resource"`.
+That is the negotiation and its consequence, four lines apart.
+
+## Read off the captures
+
+Nine things in this round were found by looking rather than by testing, which is why tests had not
+found them.
+
+- **The plan panel claimed to be working next to a finished turn.** An entry left `in_progress`
+  when a turn ends is not work in progress — the agent said it was doing that step and stopped
+  saying anything, which is what a refusal, a token limit or a cancellation looks like from here.
+  It reads `stopped here` now, which is both honest and more useful.
+- **A resolved permission rendered as its own button's label.** "Allow once" under a title reads
+  like a control that does nothing when pressed. The kind carries the verb, so the outcome can be
+  past tense.
+- **Playbook bodies carried their own bullet**, which the queue doubled with a list marker and
+  injection doubled with its own dash — so the text an agent reads began `- - Task ...`.
+- **A workflow's steps were separate change entries**, so each got the queue's bullet *and* its own
+  number: `• 1. write *.rs`. A workflow is one change.
+- **Three identical evidence lines.** A distilled procedure cites the same acceptance command once
+  per occasion, and three copies of one sentence is longer than one and says less: the reader has
+  to compare them to find out they are the same, and the number — the actual evidence — was never
+  stated. It reads `×3`.
+- **File rows were absolute while attachments were relative**, so one file read two ways looked
+  like two files. Paths inside the workspace are shortened, which has a second effect worth more
+  than the consistency: an absolute path in that column now means exactly one thing. Compare the
+  refusals in `file-boundary.png` — `/etc/passwd` against `escape-link`, which is inside the
+  workspace and points out of it.
+- **The mention picker's highlight used `--bg-muted`**, which on the paper theme is *lighter* than
+  the picker's own background by five parts in 255. The row Enter would have chosen was unmarked.
+  Hover and keyboard focus are different marks now, because Enter acts on one of them.
+- **A routing decision was erased by the next status change.** Which agent ran a task was written
+  into the dispatch state change's detail, and a detail is replaced by the next one — so the choice
+  survived for the seconds the task spent dispatched and was gone by "completed", which is the
+  state anybody reading a finished run is looking at. `run-view.png` carries `Ran on` on every card.
+- **Approve was a filled button and Reject was not.** A filled accent button is the one a reader
+  clicks without reading, and what waits in that queue is the system asking to change its own
+  future instructions. Both carry the same weight now; only their colour says which is which.
+
+And one that was the interface being right: `paper-transcript.png` came out showing the turn
+*before* the one it is a capture of, because the previous capture had scrolled up and the record
+correctly stayed where it was put rather than following the new turn. The script scrolls back now.
+
 ## Two things from the references that were not adopted
 
 **The user's message is still a quote line, not a right-aligned bubble.** Both references bubble it,
