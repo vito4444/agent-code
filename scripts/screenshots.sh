@@ -70,6 +70,39 @@ click() {
 }
 shot() { DISPLAY="$DISPLAY_NUM" import -window "$WID" "$OUT/$1.png" && echo "  $1.png"; }
 
+# The first clickable row on a list screen, found rather than assumed.
+#
+# The run list and the proposal queue both put one bordered row below a heading, and both were reached
+# by a hard-coded offset until two captures came out byte-identical: the coordinate was measured before
+# the title-bar correction, so the click landed in dead space and the "after" screenshot was the
+# "before" one. Two files with the same hash is what caught it, which is a poor substitute for not
+# guessing in the first place.
+first_row_y() {
+    DISPLAY="$DISPLAY_NUM" import -window "$WID" "$WORK/probe.png"
+    python3 - "$WORK/probe.png" <<'PYROW'
+import subprocess, sys, re
+
+out = subprocess.run(['convert', sys.argv[1], '-crop', '800x500+240+100', 'txt:-'],
+                     capture_output=True, text=True).stdout
+rows = {}
+for line in out.splitlines()[1:]:
+    m = re.match(r'(\d+),(\d+): \((\d+),(\d+),(\d+)', line)
+    if not m:
+        continue
+    x, y, r, g, b = (int(v) for v in m.groups())
+    # The border colour, #ddd8cd, which on these screens draws the row outlines.
+    if abs(r - 221) < 12 and abs(g - 216) < 12 and abs(b - 205) < 12:
+        rows.setdefault(y, 0)
+        rows[y] += 1
+
+# A row outline is a long horizontal run. The first one is the top edge of the first row; clicking a
+# little below it lands inside.
+edges = sorted(y for y, n in rows.items() if n > 500)
+print(100 + edges[0] + 20 if edges else 0)
+PYROW
+}
+
+
 echo "building"
 ( cd "$ROOT/ui" && pnpm build > /dev/null 2>&1 )
 cargo build -q -p wkbd-core -p fake-acp-agent 2>&1 | tail -3
@@ -261,8 +294,29 @@ echo "  nav: runs=$RUNS_Y proposals=$PROPOSALS_Y rules=$RULES_Y"
 
 click 30 "$RUNS_Y"
 shot run-list
-# The run row sits below the start-a-run form.
-click 600 200 3
+# The run row is found by its status badge rather than by its border. A border scan finds the Project
+# field above it — which is what happened, and the evidence was a screenshot of the run list with that
+# field focused. The badge colour appears nowhere else on the screen.
+RUN_ROW=$(DISPLAY="$DISPLAY_NUM" import -window "$WID" "$WORK/runs.png" && python3 - "$WORK/runs.png" <<'PYRUN'
+import subprocess, sys, re
+out = subprocess.run(['convert', sys.argv[1], 'txt:-'], capture_output=True, text=True).stdout
+rows = {}
+for line in out.splitlines()[1:]:
+    m = re.match(r'(\d+),(\d+): \((\d+),(\d+),(\d+)', line)
+    if not m:
+        continue
+    x, y, r, g, b = (int(v) for v in m.groups())
+    # The attention foreground, #8a6320, which on this screen only a run's status badge uses.
+    if abs(r - 138) < 25 and abs(g - 99) < 25 and abs(b - 32) < 30:
+        rows.setdefault(y, 0)
+        rows[y] += 1
+hits = sorted(y for y, n in rows.items() if n > 8)
+print(hits[0] if hits else 0)
+PYRUN
+)
+[ "${RUN_ROW:-0}" -gt 0 ] || { echo "could not find the run row"; exit 1; }
+echo "  run row at y=$RUN_ROW"
+click 600 "$RUN_ROW" 3
 shot run-view
 
 # The two links on a task card are found by looking for them, not by counting rows. They share a row
@@ -282,21 +336,33 @@ for line in out.splitlines()[1:]:
     if 150 < r < 210 and 60 < g < 110 and 30 < b < 80:
         rows.setdefault(y, []).append(x)
 
-# The first row wide enough to be an underline rather than stray antialiasing.
-candidates = sorted((y, sorted(xs)) for y, xs in rows.items() if len(xs) > 40)
+def cluster(xs):
+    out, current = [], [xs[0]]
+    for x in xs[1:]:
+        if x - current[-1] > 12:
+            out.append(current)
+            current = []
+        current.append(x)
+    out.append(current)
+    return out
+
+
+# The row with *two* underlines, which is what a task card has and nothing else on this screen does.
+# Picking the first wide row instead finds "All runs" at the top, which is also an accent link — the
+# earlier version did exactly that and produced a screenshot of the run list.
+candidates = []
+for y, xs in rows.items():
+    if len(xs) < 40:
+        continue
+    cs = cluster(sorted(xs))
+    if len(cs) >= 2:
+        candidates.append((y, cs))
+candidates.sort()
 if not candidates:
     print("0 0 0")
     raise SystemExit
 
-y, xs = candidates[0]
-# Runs of adjacent x, which is what separates the two links sharing the row.
-clusters, current = [], [xs[0]]
-for x in xs[1:]:
-    if x - current[-1] > 12:
-        clusters.append(current)
-        current = []
-    current.append(x)
-clusters.append(current)
+y, clusters = candidates[0]
 
 
 def mid(c):
@@ -314,12 +380,13 @@ if [ "${LINK_Y:-0}" -gt 0 ]; then
     echo "  task links at y=$LINK_Y: diff=$LEFT_X transcript=$RIGHT_X"
     click "$LEFT_X" "$LINK_Y" 3
     shot review-task
-    click 1211 29 2
+    DISPLAY="$DISPLAY_NUM" xdotool key Escape
+    sleep 2
     if [ "${RIGHT_X:-0}" -gt 0 ]; then
         click "$RIGHT_X" "$LINK_Y" 3
         shot worker-transcript
         click 30 "$RUNS_Y"
-        click 600 200 3
+        click 600 "$RUN_ROW" 3
     fi
 
     # The candidate's own diff is deliberately not captured here.
@@ -358,7 +425,9 @@ sleep 12
 raise
 click 30 "$PROPOSALS_Y"
 shot proposal-queue
-click 700 150 3
+PROP_ROW=$(first_row_y)
+[ "${PROP_ROW:-0}" -gt 0 ] || { echo "could not find the proposal row"; exit 1; }
+click 700 "$PROP_ROW" 3
 shot proposal-review
 
 # ---------------------------------------------------------------- mid-thought

@@ -109,3 +109,27 @@ describe('reading a change at full width', () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe('getting out of it', () => {
+  /**
+   * A surface that covers everything else needs a way out that does not require finding a button, and
+   * this is the binding every reader already has.
+   */
+  it('closes on escape', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ReviewSurface title="t" load={load(set())} onClose={onClose} />);
+    await screen.findByTestId('review-files');
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  /** Unbound when there is nowhere to go, so it cannot swallow the key from what is underneath. */
+  it('does not listen when it cannot close', async () => {
+    const user = userEvent.setup();
+    render(<ReviewSurface title="t" load={load(set())} />);
+    await screen.findByTestId('review-files');
+    await user.keyboard('{Escape}');
+    expect(screen.getByTestId('review')).toBeTruthy();
+  });
+});

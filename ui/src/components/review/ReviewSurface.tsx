@@ -36,6 +36,20 @@ export function ReviewSurface({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
+  // Escape closes it.
+  //
+  // A full-width surface that covers everything else needs a way out that does not require finding a
+  // button, and this is the binding every reader already has. Bound while it is open and unbound when
+  // it is not, so it cannot swallow the key from whatever is underneath.
+  useEffect(() => {
+    if (!onClose) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   useEffect(() => {
     let live = true;
     load()
