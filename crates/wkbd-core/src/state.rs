@@ -26,6 +26,38 @@ pub struct InspectorFrame {
     pub agent_id: String,
     pub line: String,
     pub malformed: bool,
+    /// Bytes dropped from the end of `line`, when it was too long to keep whole.
+    ///
+    /// Reported as a number rather than by appending a sentence to the line, because everything
+    /// else in that field is exactly what crossed the pipe and a note wearing the same clothes as
+    /// the data is how a debugging aid starts lying.
+    pub clipped_bytes: Option<usize>,
+}
+
+/// Longest frame kept whole.
+///
+/// The buffer below bounds the number of frames, which was the whole story until a prompt could
+/// carry an attachment: an embedded resource is up to 256 kB, and 5,000 of those is a gigabyte
+/// held to show somebody the shape of a JSON message. Clipping at 4 kB keeps the method, the
+/// parameters and the beginning of any payload — which is what the shape is — and puts the worst
+/// case at about 20 MB.
+const MAX_FRAME_BYTES: usize = 4 * 1024;
+
+/// Clips a frame to something worth keeping, on a character boundary.
+fn clip_frame(line: String) -> (String, Option<usize>) {
+    if line.len() <= MAX_FRAME_BYTES {
+        return (line, None);
+    }
+    // Never mid-character: a String sliced through a multi-byte sequence panics, and a JSON frame
+    // is full of them the moment an agent writes anything but ASCII.
+    let mut end = MAX_FRAME_BYTES;
+    while end > 0 && !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    let dropped = line.len() - end;
+    let mut kept = line;
+    kept.truncate(end);
+    (kept, Some(dropped))
 }
 
 pub struct LiveSession {
@@ -439,6 +471,7 @@ pub fn spawn_dispatchers(
             if log.len() >= 5_000 {
                 log.drain(0..1_000);
             }
+            let (line, clipped_bytes) = clip_frame(frame.line);
             log.push(InspectorFrame {
                 at_ms: frame.at_ms,
                 direction: match frame.direction {
@@ -446,9 +479,50 @@ pub fn spawn_dispatchers(
                     Direction::FromAgent => "from_agent",
                 },
                 agent_id: key.agent_id.clone(),
-                line: frame.line,
+                line,
                 malformed: frame.malformed,
+                clipped_bytes,
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_short_frame_is_kept_whole() {
+        let (line, clipped) = clip_frame("{\"method\":\"initialize\"}".into());
+        assert_eq!(line, "{\"method\":\"initialize\"}");
+        assert_eq!(clipped, None);
+    }
+
+    /// The case attachments created. An embedded resource is up to 256 kB of file contents inside
+    /// one JSON string, and the inspector keeps thousands of frames.
+    #[test]
+    fn a_frame_carrying_a_file_is_clipped_and_says_by_how_much() {
+        let long = format!("{{\"prompt\":\"{}\"}}", "x".repeat(MAX_FRAME_BYTES * 2));
+        let total = long.len();
+        let (line, clipped) = clip_frame(long);
+
+        assert_eq!(line.len(), MAX_FRAME_BYTES);
+        assert_eq!(clipped, Some(total - MAX_FRAME_BYTES));
+        // The front is what carries the shape, so that is the end that is kept.
+        assert!(line.starts_with("{\"prompt\":"));
+    }
+
+    /// Slicing a String through a multi-byte sequence panics, and a frame is full of them the
+    /// moment an agent writes anything but ASCII — which for this project is the common case.
+    #[test]
+    fn clipping_never_splits_a_character() {
+        let long = "。".repeat(MAX_FRAME_BYTES);
+        let (line, clipped) = clip_frame(long.clone());
+
+        assert!(line.len() <= MAX_FRAME_BYTES);
+        assert!(clipped.is_some());
+        // The proof: it is still a string, and every character in it is whole.
+        assert!(line.chars().all(|c| c == '。'));
+        assert_eq!(line.len() + clipped.unwrap(), long.len());
+    }
 }

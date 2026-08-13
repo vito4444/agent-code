@@ -226,9 +226,18 @@ export function deleteRule(id: string): Promise<void> {
   return json(`/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
+/** One ACP frame as the daemon kept it, which may be the front of a longer one. */
+export interface RawFrame {
+  at_ms: number;
+  direction: string;
+  agent_id: string;
+  line: string;
+  /** Bytes dropped from the end. An attached file makes a prompt frame far longer than a screen. */
+  clipped_bytes: number | null;
+  malformed: boolean;
+}
+
 /** Raw ACP frames, for the message inspector. */
-export function fetchRawFrames(
-  limit = 500,
-): Promise<{ at_ms: number; direction: string; agent_id: string; line: string; malformed: boolean }[]> {
+export function fetchRawFrames(limit = 500): Promise<RawFrame[]> {
   return json(`/raw?limit=${limit}`);
 }

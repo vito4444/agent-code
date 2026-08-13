@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchRawFrames } from '../../lib/api';
+import { fetchRawFrames, type RawFrame } from '../../lib/api';
 
 /**
  * Raw protocol frames, in both directions, exactly as they crossed the wire.
@@ -11,16 +11,19 @@ import { fetchRawFrames } from '../../lib/api';
  * cannot end a session, and skipped-and-invisible would be indistinguishable from
  * never-sent.
  */
-interface Frame {
-  at_ms: number;
-  direction: string;
-  agent_id: string;
-  line: string;
-  malformed: boolean;
+
+
+/** The size of what is missing, which is the part that decides whether to go and look elsewhere. */
+function formatClip(bytes: number): string {
+  const size =
+    bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024
+      ? `${Math.round(bytes / 1024)} kB`
+      : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${size} more, not kept — the inspector holds the first 4 kB of a frame`;
 }
 
 export function RawInspector() {
-  const [frames, setFrames] = useState<Frame[]>([]);
+  const [frames, setFrames] = useState<RawFrame[]>([]);
   const [filter, setFilter] = useState('');
   const [onlyMalformed, setOnlyMalformed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +80,13 @@ export function RawInspector() {
             <span className="frame-time">{new Date(f.at_ms).toLocaleTimeString()}</span>
             {f.malformed && <span className="frame-bad">not JSON</span>}
             <pre className="frame-line">{f.line}</pre>
+            {f.clipped_bytes !== null && f.clipped_bytes > 0 && (
+              /* Outside the <pre>, because everything inside it is exactly what crossed the pipe
+                 and a note in the same clothes as the data is how a debugging aid starts lying.
+                 An attached file arrives here as a JSON string of its whole contents, so one
+                 prompt used to fill the screen and bury every frame around it. */
+              <p className="frame-clipped">{formatClip(f.clipped_bytes)}</p>
+            )}
           </li>
         ))}
       </ol>

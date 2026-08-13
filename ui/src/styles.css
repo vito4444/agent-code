@@ -2029,6 +2029,13 @@
   color: var(--fg-danger);
 }
 
+.frame-clipped {
+  margin: var(--space-4) 0 0;
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+  font-style: italic;
+}
+
 .frame-line {
   grid-column: 1 / -1;
   margin: 0;

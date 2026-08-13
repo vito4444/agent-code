@@ -377,6 +377,7 @@ PY
 RUNS_Y=$(nav_y runs)
 PROPOSALS_Y=$(nav_y proposals)
 RULES_Y=$(nav_y rules)
+PROTOCOL_Y=$(nav_y protocol)
 SETTINGS_Y=$(nav_y settings)
 # The sidebar with a run in flight: workers grouped under the run and named by task, which is what
 # the grouping exists for and what the first version of it got wrong.
@@ -387,7 +388,7 @@ if [ "${RUNS_Y:-0}" -lt 100 ]; then
     echo "could not locate the sidebar navigation; refusing to click blindly"
     exit 1
 fi
-echo "  nav: runs=$RUNS_Y proposals=$PROPOSALS_Y rules=$RULES_Y settings=$SETTINGS_Y"
+echo "  nav: runs=$RUNS_Y proposals=$PROPOSALS_Y rules=$RULES_Y protocol=$PROTOCOL_Y settings=$SETTINGS_Y"
 
 click 30 "$RUNS_Y"
 shot run-list
@@ -509,6 +510,18 @@ fi
 # ---------------------------------------------------------------- the rules screen
 click 30 "$RULES_Y"
 shot user-rules
+
+# ---------------------------------------------------------------- the protocol log
+#
+# The last screen with no capture, which is the reason to take one: a screen nobody has looked at
+# is where a defect sits undisturbed. It is also the one that answers "what did the agent actually
+# say", so it is the screen a protocol argument gets settled on.
+if [ "${PROTOCOL_Y:-0}" -gt 100 ]; then
+    click 30 "$PROTOCOL_Y"
+    shot protocol-log
+else
+    echo "  (could not locate the protocol log; skipping protocol-log.png)"
+fi
 
 # ---------------------------------------------------------------- settings
 if [ "${SETTINGS_Y:-0}" -gt 100 ]; then
