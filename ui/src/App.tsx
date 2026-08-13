@@ -321,6 +321,11 @@ export function App() {
 
         {screen === 'chat' && (
           <>
+            {/* The wrapper exists so the jump-to-latest pill can be positioned against the foot
+                of the visible record. Inside the scrolling element it would scroll away with the
+                content; outside it, the only available anchor is the whole column, whose bottom
+                moves whenever the composer grows a queue or an attachment strip. */}
+            <div className="transcript-frame">
             <div
               className="transcript"
               data-testid="transcript"
@@ -374,6 +379,7 @@ export function App() {
                 Jump to latest
               </button>
             )}
+            </div>
 
             {/* Between the transcript and the composer, and outside the scrolling record.
                 Outside because a plan is replaced wholesale on every update — it is current state

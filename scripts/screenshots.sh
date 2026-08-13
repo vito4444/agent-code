@@ -77,6 +77,50 @@ shot() { DISPLAY="$DISPLAY_NUM" import -window "$WID" "$OUT/$1.png" && echo "  $
 # the title-bar correction, so the click landed in dead space and the "after" screenshot was the
 # "before" one. Two files with the same hash is what caught it, which is a poor substitute for not
 # guessing in the first place.
+# The newest session in the sidebar, found rather than assumed.
+#
+# This exists because the assumption was wrong and the screenshots were lying about it. The
+# script used to open a session over the API and capture immediately, with a comment saying the
+# newest session is selected automatically. It is not: the interface only auto-selects when
+# nothing is selected yet, which is correct — taking the view away from somebody reading a
+# transcript because a run started a worker elsewhere would be worse. So `file-boundary.png`
+# was a picture of the previous conversation for as long as that comment was there.
+#
+# Sessions are the only rows in the sidebar between the filter box and the nav footer, so the
+# bottom-most band of text in that column is the newest one.
+last_session_y() {
+    DISPLAY="$DISPLAY_NUM" import -window "$WID" "$WORK/side.png"
+    python3 - "$WORK/side.png" <<'PYSIDE'
+import subprocess, sys, re
+
+TOP, BOTTOM, LEFT, WIDTH = 95, 520, 16, 180
+out = subprocess.run(
+    ['convert', sys.argv[1], '-crop', f'{WIDTH}x{BOTTOM - TOP}+{LEFT}+{TOP}', 'txt:-'],
+    capture_output=True, text=True).stdout
+
+rows = {}
+for line in out.splitlines()[1:]:
+    m = re.match(r'(\d+),(\d+): \((\d+),(\d+),(\d+)', line)
+    if not m:
+        continue
+    _, y, r, g, b = (int(v) for v in m.groups())
+    # Text, not the paper background and not the muted grey of a project heading.
+    if r < 110 and g < 110 and b < 110:
+        rows[y] = rows.get(y, 0) + 1
+
+bands, current = [], []
+for y in sorted(rows):
+    if current and y - current[-1] > 4:
+        bands.append(current)
+        current = []
+    current.append(y)
+if current:
+    bands.append(current)
+
+print(TOP + sum(bands[-1]) // len(bands[-1]) if bands else 0)
+PYSIDE
+}
+
 first_row_y() {
     DISPLAY="$DISPLAY_NUM" import -window "$WID" "$WORK/probe.png"
     python3 - "$WORK/probe.png" <<'PYROW'
@@ -249,9 +293,11 @@ DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers ctrl+a
 DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers BackSpace
 S1B=$(api /api/sessions -X POST -H 'content-type: application/json' \
     -d "{\"agent_id\":\"rich\",\"project_root\":\"$ROOT\"}" | jq -r .id)
+# A file and a directory, so the strip has to show both outcomes: one the agent was handed and
+# one it was only pointed at.
 api /api/sessions/"$S1B"/prompt -X POST -H 'content-type: application/json' \
-    -d '{"text":"compare these two and tell me which one owns the invariant",
-         "mentions":["crates/wkbd-proto/src/normalize.rs","docs/UI-SPEC.md"]}' > /dev/null
+    -d '{"text":"where is the one-live-segment invariant enforced?",
+         "mentions":["crates/wkbd-proto/src/normalize.rs","crates/wkbd-sec"]}' > /dev/null
 sleep 4
 REQ=$(python3 "$ROOT/scripts/read-events.py" "$PORT" 0 1.5 2> /dev/null \
     | jq -r --arg s "$S1B" \
@@ -260,6 +306,13 @@ api /api/sessions/"$S1B"/permission -X POST -H 'content-type: application/json' 
     -d "{\"request_id\":\"$REQ\",\"option_id\":\"allow-once\"}" > /dev/null
 sleep 6
 raise
+click 100 "$(last_session_y)" 2
+# Scrolled back to the prompt, which is where the attachments are and which a finished turn has
+# pushed off the top. It also puts the way back on screen, which is the other half of following
+# a conversation and is only ever visible in this state.
+DISPLAY="$DISPLAY_NUM" xdotool mousemove "$((WX + 600))" "$((WY + 300))"
+DISPLAY="$DISPLAY_NUM" xdotool click --repeat 25 --delay 30 4
+sleep 1.5
 shot paper-attachment
 
 # ---------------------------------------------------------------- the file boundary
@@ -269,7 +322,7 @@ api /api/sessions/"$S2"/prompt -X POST -H 'content-type: application/json' \
     -d '{"text":"probe the boundary"}' > /dev/null
 sleep 8
 raise
-# The newest session is selected automatically, so the probing agent's transcript is on screen.
+click 100 "$(last_session_y)" 2
 shot file-boundary
 
 # ---------------------------------------------------------------- a run

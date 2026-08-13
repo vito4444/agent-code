@@ -132,6 +132,16 @@
   min-height: 0;
 }
 
+/* Holds the scrolling record and nothing else, so the pill inside it can be placed against the
+   foot of what the reader can actually see. */
+.transcript-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .banner {
   padding: var(--space-8) var(--space-16);
   font-size: var(--chat-font-size-s);
@@ -153,10 +163,17 @@
 }
 
 /* Only present while the record is detached, which is the only time it means anything. A
-   permanent button here would be a permanent claim that you are missing something. */
+   permanent button here would be a permanent claim that you are missing something.
+
+   Floated rather than placed in the flow. In the flow it appears and disappears as the reader
+   scrolls, which moves everything below it by its own height — so the act of scrolling up
+   reflows the composer, and scrolling back down reflows it again. */
 .jump-latest {
-  align-self: center;
-  margin: calc(-1 * var(--space-16)) 0 var(--space-4);
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-12);
+  transform: translateX(-50%);
+  z-index: 5;
   padding: var(--space-4) var(--space-12);
   border: var(--border-thin) solid var(--border-default);
   border-radius: var(--radius-full);
