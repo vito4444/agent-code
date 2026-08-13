@@ -21,6 +21,7 @@ export function Turn({ turn, onAnswerPermission }: {
   return (
     <article className="turn" data-turn={turn.turn} data-testid={`turn-${turn.turn}`}>
       <blockquote className="turn-prompt">{turn.prompt}</blockquote>
+      {turn.attachments.length > 0 && <AttachmentList turn={turn} />}
 
       <div className="turn-body">
         {turn.items.map((item, i) => (
@@ -34,6 +35,7 @@ export function Turn({ turn, onAnswerPermission }: {
         </div>
       )}
       {running && <div className="turn-running">working…</div>}
+      <TurnCost turn={turn} />
       {turn.segmentation_best_effort && (
         <div className="turn-note">
           This agent does not label its messages, so the split between thinking and answering
@@ -42,6 +44,94 @@ export function Turn({ turn, onAnswerPermission }: {
       )}
     </article>
   );
+}
+
+/**
+ * What the user attached, and what the agent actually got.
+ *
+ * The second half is the reason this is not just a list of filenames. An attachment that fell
+ * back to a link is a file the agent has to go and open, and if it does not, the answer is
+ * about nothing — which reads as the model ignoring the request rather than as a capability the
+ * agent never had. Saying it here, in the transcript, is the only place it can still be
+ * connected to the answer it explains.
+ */
+function AttachmentList({ turn }: { turn: TurnView }) {
+  return (
+    <ul className="turn-attachments" data-testid={`turn-${turn.turn}-attachments`}>
+      {turn.attachments.map((a) => (
+        <li key={a.uri} data-sent-as={a.sent_as}>
+          <span className="attachment-path">{a.name}</span>
+          <span className="attachment-how">{describeSentAs(a.sent_as, a.degraded)}</span>
+          {a.bytes !== null && <span className="attachment-size">{bytes(a.bytes)}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function describeSentAs(sentAs: string, degraded: string | null): string {
+  if (sentAs === 'embedded') return 'contents sent';
+  if (sentAs === 'image') return 'image sent';
+  switch (degraded) {
+    case 'too-large':
+      return 'path only, too large to inline';
+    case 'not-text':
+      return 'path only, not text';
+    case 'directory':
+      return 'path only, a directory';
+    default:
+      return 'path only, the agent must open it';
+  }
+}
+
+function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} kB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * What the turn took: wall time, and context if the agent reported any.
+ *
+ * Duration always, because we timed it ourselves. Tokens only when the agent reported a usage
+ * figure both before and after, since the difference of two readings is the only honest way to
+ * attribute a running total to one turn — and an agent that reports nothing gets no number
+ * rather than an estimate that reads like a measurement.
+ */
+function TurnCost({ turn }: { turn: TurnView }) {
+  const parts: string[] = [];
+
+  if (turn.startedMs !== null && turn.endedMs !== null) {
+    parts.push(duration(turn.endedMs - turn.startedMs));
+  }
+  if (turn.usedBefore !== null && turn.usedAfter !== null && turn.usedAfter > turn.usedBefore) {
+    parts.push(`${tokens(turn.usedAfter - turn.usedBefore)} tokens`);
+  }
+  if (parts.length === 0) return null;
+
+  return (
+    <div className="turn-cost" data-testid={`turn-${turn.turn}-cost`}>
+      {parts.join(' \u00b7 ')}
+    </div>
+  );
+}
+
+function duration(ms: number): string {
+  if (ms < 1000) return `${Math.max(ms, 0)}ms`;
+  if (ms < 60_000) {
+    // A tenth of a second is worth showing on a short turn and not on a long one, and a
+    // trailing ".0" is noise either way.
+    const s = (ms / 1000).toFixed(ms < 10_000 ? 1 : 0).replace(/\.0$/, '');
+    return `${s}s`;
+  }
+  const m = Math.floor(ms / 60_000);
+  const s = Math.round((ms % 60_000) / 1000);
+  return `${m}m ${s}s`;
+}
+
+function tokens(n: number): string {
+  if (n < 1000) return `${n}`;
+  return `${(n / 1000).toFixed(1)}k`;
 }
 
 function ItemView({

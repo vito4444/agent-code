@@ -2,15 +2,10 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Turn } from './Turn';
 import type { TurnItem, TurnView } from '../../lib/types';
+import { emptyTurn } from '../../lib/store';
 
 function turn(items: TurnItem[]): TurnView {
-  return {
-    turn: 1,
-    prompt: 'do the thing',
-    items,
-    stop_reason: 'end_turn',
-    segmentation_best_effort: false,
-  };
+  return { ...emptyTurn(1, 'do the thing'), items, stop_reason: 'end_turn' };
 }
 
 function file(over: Partial<Extract<TurnItem, { type: 'file' }>>): TurnItem {

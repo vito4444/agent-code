@@ -11,6 +11,7 @@ function session(over: Partial<SessionSummary>): SessionSummary {
     agent_display_name: 'Rich Agent',
     project_root: '/workspace',
     title: null,
+    prompt_capabilities: { image: false, audio: false, embedded_context: false },
     ...over,
   };
 }

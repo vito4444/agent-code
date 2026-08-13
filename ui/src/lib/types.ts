@@ -178,7 +178,7 @@ export function runIdFromStreamId(streamId: string): string | null {
 
 /** Discriminated by `event`, matching the Rust serde tag. */
 export type EventPayload =
-  | { event: 'turn_started'; turn: number; prompt: string }
+  | { event: 'turn_started'; turn: number; prompt: string; attachments?: Attachment[] }
   | { event: 'turn_ended'; turn: number; stop_reason: StopReasonName }
   | { event: 'segment_started'; segment: SegmentId; kind: SegmentKindName }
   | { event: 'segment_chunk'; segment: SegmentId; text: string }
@@ -308,13 +308,58 @@ export type TurnItem =
       bytes: number | null;
     };
 
+/**
+ * How an attachment actually reached the agent.
+ *
+ * `embedded` and `image` mean the agent was handed the bytes. `link` means it was handed a path
+ * and has to open it itself — which it may not be able to do. Shown rather than kept internal:
+ * a mention that quietly became a link produces an answer about a file nobody read, and from
+ * the outside that is indistinguishable from the model ignoring the request.
+ */
+export type SentAs = 'embedded' | 'image' | 'link';
+
+export interface Attachment {
+  uri: string;
+  name: string;
+  sent_as: SentAs;
+  bytes: number | null;
+  /** `too-large`, `not-text`, `directory`, `agent-cannot-embed`. Null when nothing was given up. */
+  degraded: string | null;
+}
+
 export interface TurnView {
   turn: number;
   prompt: string;
+  attachments: Attachment[];
   items: TurnItem[];
   stop_reason: StopReasonName | null;
   /** True when at least one segment boundary was inferred rather than declared. */
   segmentation_best_effort: boolean;
+  /**
+   * When the turn opened and closed, taken from the timestamps of its own events.
+   *
+   * camelCase because these are derived here rather than sent: the wire carries an event and a
+   * time, and which turn that time bounds is this fold's conclusion. The snake_case fields on
+   * this type are the ones the daemon actually sends.
+   */
+  startedMs: number | null;
+  endedMs: number | null;
+  /**
+   * Context occupied when the turn began and when it ended.
+   *
+   * Two readings rather than one difference, because only the agent can report either and many
+   * never do. The difference is shown only when both exist — anything else here would be an
+   * estimate that reads as a measurement.
+   */
+  usedBefore: number | null;
+  usedAfter: number | null;
+}
+
+/** What the agent told us at `initialize` that it can be given in a prompt. */
+export interface PromptCapabilities {
+  image: boolean;
+  audio: boolean;
+  embedded_context: boolean;
 }
 
 export interface SessionSummary {
@@ -323,6 +368,14 @@ export interface SessionSummary {
   agent_display_name: string;
   project_root: string;
   title: string | null;
+  prompt_capabilities: PromptCapabilities;
+}
+
+/** One completion candidate for an `@` mention. */
+export interface PathEntry {
+  path: string;
+  name: string;
+  is_dir: boolean;
 }
 
 /**

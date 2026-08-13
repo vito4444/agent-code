@@ -223,7 +223,7 @@ export const useStore = create<StoreShape>((set, get) => ({
         }
 
         const existing = sessions[ev.session_id] ?? emptySession();
-        sessions[ev.session_id] = applyOne(existing, ev.payload);
+        sessions[ev.session_id] = applyOne(existing, ev.payload, ev.at_ms);
       }
 
       return { sessions, runs, highWaterMark: hwm };
@@ -288,15 +288,43 @@ export const useStore = create<StoreShape>((set, get) => ({
  * replayed log must produce the same view; the Rust one is authoritative and is what the
  * fixture test compares against.
  */
-export function applyOne(state: SessionState, payload: EventPayload): SessionState {
+/**
+ * A turn with nothing in it yet.
+ *
+ * Exported so that the fold and the tests build turns the same way. When this type gains a
+ * field, the fold gets it and every fixture gets it, which is the difference between a compile
+ * error in one place and four fixtures that quietly describe a turn that cannot exist.
+ */
+export function emptyTurn(turn: number, prompt: string): TurnView {
+  return {
+    turn,
+    prompt,
+    attachments: [],
+    items: [],
+    stop_reason: null,
+    segmentation_best_effort: false,
+    startedMs: null,
+    endedMs: null,
+    usedBefore: null,
+    usedAfter: null,
+  };
+}
+
+export function applyOne(
+  state: SessionState,
+  payload: EventPayload,
+  atMs?: number,
+): SessionState {
   switch (payload.event) {
     case 'turn_started': {
       const turn: TurnView = {
-        turn: payload.turn,
-        prompt: payload.prompt,
-        items: [],
-        stop_reason: null,
-        segmentation_best_effort: false,
+        ...emptyTurn(payload.turn, payload.prompt),
+        attachments: payload.attachments ?? [],
+        startedMs: atMs ?? null,
+        // The reading the previous turn ended on. Subtracting it later is what turns a running
+        // total into "what this turn cost", and it has to be captured now: by the time the turn
+        // ends the only number available is the new total.
+        usedBefore: state.usage?.used ?? null,
       };
       return { ...state, turns: [...state.turns, turn], busy: true };
     }
@@ -308,6 +336,8 @@ export function applyOne(state: SessionState, payload: EventPayload): SessionSta
         turns[last] = {
           ...turns[last],
           stop_reason: payload.stop_reason,
+          endedMs: atMs ?? turns[last].endedMs,
+          usedAfter: state.usage?.used ?? null,
           // A finished turn may not leave a segment live. Without this a dropped
           // settle event would leave a spinner running for the rest of the session.
           items: turns[last].items.map(settleSegment),

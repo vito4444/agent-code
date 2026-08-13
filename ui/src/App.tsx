@@ -153,10 +153,10 @@ export function App() {
   }, [activeId, session.busy]);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, mentions: string[] = []) => {
       if (!activeId) return;
       useStore.getState().setBusy(activeId, true);
-      api.sendPrompt(activeId, text).catch(() => {
+      api.sendPrompt(activeId, text, mentions).catch(() => {
         useStore.getState().setBusy(activeId, false);
       });
     },
@@ -378,6 +378,9 @@ export function App() {
               queue={session.queue}
               autonomy={autonomy}
               steeringSupported={false}
+              sessionId={activeId}
+              promptCapabilities={summary?.prompt_capabilities}
+              searchPaths={api.sessionPaths}
               onSend={send}
               onQueue={(text) => {
                 if (!activeId) return;
@@ -391,7 +394,7 @@ export function App() {
                 if (!activeId) return;
                 api
                   .cancelTurn(activeId)
-                  .then(() => send(text))
+                  .then(() => send(text, []))
                   .catch(() => {});
               }}
               onCancel={() => {

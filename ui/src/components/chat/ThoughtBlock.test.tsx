@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ThoughtBlock } from './ThoughtBlock';
 import { Turn } from './Turn';
 import type { SegmentView, TurnView } from '../../lib/types';
+import { emptyTurn } from '../../lib/store';
 
 function segment(raw: string, state: 'live' | 'settled', text: string): SegmentView {
   return { id: { raw, synthesized: false }, kind: 'thought', text, state };
@@ -60,10 +61,7 @@ describe('a turn with several thoughts', () => {
    * not ended" opens all three and pushes the answer off screen.
    */
   const turn: TurnView = {
-    turn: 1,
-    prompt: 'why is config slow',
-    stop_reason: null,
-    segmentation_best_effort: false,
+    ...emptyTurn(1, 'why is config slow'),
     items: [
       { type: 'segment', segment: segment('m1', 'settled', 'look at the loader') },
       {

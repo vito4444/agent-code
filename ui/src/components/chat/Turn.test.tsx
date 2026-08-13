@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Turn } from './Turn';
 import type { TurnView } from '../../lib/types';
+import { emptyTurn } from '../../lib/store';
 
 /**
  * Structural assertions about the three bands.
@@ -13,13 +14,7 @@ import type { TurnView } from '../../lib/types';
  * this is the part of that which is testable.
  */
 function turnWith(items: TurnView['items'], stopReason: TurnView['stop_reason'] = 'end_turn'): TurnView {
-  return {
-    turn: 1,
-    prompt: 'why is config slow',
-    items,
-    stop_reason: stopReason,
-    segmentation_best_effort: false,
-  };
+  return { ...emptyTurn(1, 'why is config slow'), items, stop_reason: stopReason };
 }
 
 describe('turn structure', () => {

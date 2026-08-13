@@ -185,6 +185,53 @@
   white-space: pre-wrap;
 }
 
+/* Attached files ride with the message that attached them, tight under the quoted line, so
+   the pairing survives a screen full of tool calls between them and the answer. */
+.turn-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: calc(-1 * var(--space-20)) 0 var(--space-20);
+  padding: 0 0 0 var(--space-12);
+  list-style: none;
+}
+
+.turn-attachments li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.turn-attachments li::before {
+  content: '';
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--fg-success);
+  align-self: center;
+}
+
+/* A link is the degraded case, and it should not look like the healthy one. */
+.turn-attachments li[data-sent-as='link']::before {
+  background: transparent;
+  border: 1px solid var(--fg-muted);
+}
+
+.turn-attachments .attachment-size {
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the turn took. Quiet: it is a thing you look for, not a thing that should interrupt
+   reading the answer. */
+.turn-cost {
+  margin-top: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .turn-body {
   display: flex;
   flex-direction: column;
@@ -842,9 +889,109 @@
 }
 
 .composer-box {
+  position: relative;
   border: var(--border-thin) solid var(--border-default);
   border-radius: var(--radius-medium);
   background: var(--bg-default);
+}
+
+/* The completion list sits above the box rather than below it. Below, it would cover the
+   footer controls and, on a short window, fall off the bottom of the screen — and the reading
+   path already runs upward from the box into the transcript. */
+.mention-picker {
+  position: absolute;
+  bottom: calc(100% + var(--space-4));
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-4);
+  list-style: none;
+  background: var(--bg-default);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+}
+
+.mention-picker li button {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-4) var(--space-8);
+  border: none;
+  border-radius: var(--radius-small);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mention-picker li button[data-highlighted='true'],
+.mention-picker li button:hover {
+  background: var(--bg-muted);
+}
+
+.mention-name {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-default);
+}
+
+.mention-path {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-empty {
+  margin: 0;
+  padding: var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+/* What is about to be sent, above the box, next to the message it belongs to. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.attachments li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.attachments li button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--fg-muted);
+  padding: 0;
+  line-height: 1;
+}
+
+.attachment-path {
+  font-family: var(--font-mono);
+  color: var(--fg-default);
+}
+
+.attachment-how {
+  color: var(--fg-muted);
 }
 
 .composer-box:focus-within {

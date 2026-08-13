@@ -11,13 +11,21 @@ import type { Rule } from '../components/rules/RulesScreen';
 import type {
   AgentSummary,
   ChangeSet,
+  PathEntry,
   ProposalReview,
   ProposalSummary,
   RunSummary,
   SessionSummary,
 } from './types';
 
-export type { AgentSummary, ChangeSet, ProposalReview, ProposalSummary, SessionSummary };
+export type {
+  AgentSummary,
+  ChangeSet,
+  PathEntry,
+  ProposalReview,
+  ProposalSummary,
+  SessionSummary,
+};
 
 const base = '/api';
 
@@ -108,11 +116,26 @@ export function createSession(agentId: string, projectRoot: string): Promise<Ses
   });
 }
 
-export function sendPrompt(sessionId: string, text: string): Promise<void> {
+export function sendPrompt(
+  sessionId: string,
+  text: string,
+  mentions: string[] = [],
+): Promise<void> {
   return json(`/sessions/${encodeURIComponent(sessionId)}/prompt`, {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, mentions }),
   });
+}
+
+/**
+ * Files under the session's project root, for `@` completion.
+ *
+ * Scoped to a session rather than taking a directory, so the daemon never becomes a general
+ * filesystem browser for whatever can reach the port.
+ */
+export function sessionPaths(sessionId: string, q: string): Promise<PathEntry[]> {
+  const query = new URLSearchParams({ q });
+  return json(`/sessions/${encodeURIComponent(sessionId)}/paths?${query}`);
 }
 
 export function cancelTurn(sessionId: string): Promise<void> {

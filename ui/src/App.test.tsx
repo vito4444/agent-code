@@ -9,6 +9,7 @@ function session(id: string, projectRoot: string): SessionSummary {
     agent_display_name: 'Worker',
     project_root: projectRoot,
     title: null,
+    prompt_capabilities: { image: false, audio: false, embedded_context: false },
   };
 }
 

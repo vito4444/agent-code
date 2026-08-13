@@ -158,7 +158,7 @@ describe('sending while the agent is busy', () => {
     render(<Composer {...props({ onSend })} />);
 
     await user.type(screen.getByTestId('composer-input'), 'do the thing{Enter}');
-    expect(onSend).toHaveBeenCalledWith('do the thing');
+    expect(onSend).toHaveBeenCalledWith('do the thing', []);
   });
 
   it('says when a queued message will be delivered, and lets it be withdrawn', async () => {
