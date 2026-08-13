@@ -94,7 +94,11 @@ impl Normalizer {
         self.open.is_some()
     }
 
-    pub fn begin_turn(&mut self, prompt: impl Into<String>) -> Vec<EventPayload> {
+    pub fn begin_turn(
+        &mut self,
+        prompt: impl Into<String>,
+        attachments: Vec<crate::Attachment>,
+    ) -> Vec<EventPayload> {
         let mut out = Vec::new();
         // Defensive: a second `begin_turn` without an intervening end would otherwise
         // leave the previous turn's segment live forever.
@@ -103,7 +107,11 @@ impl Normalizer {
         self.in_turn = true;
         self.syn_ordinal = 0;
         self.open_tool_calls.clear();
-        out.push(EventPayload::TurnStarted { turn: self.turn, prompt: prompt.into() });
+        out.push(EventPayload::TurnStarted {
+            turn: self.turn,
+            prompt: prompt.into(),
+            attachments,
+        });
         out
     }
 

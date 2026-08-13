@@ -39,9 +39,22 @@ pub struct TurnContext {
     /// what an unattended daemon returns, which is why the default answer is refusal
     /// rather than approval.
     pub ask_user: Arc<dyn AskUser>,
-    /// Enforces the boundary for file access performed on the agent's behalf. `None` means the
-    /// capability was not offered, so a request for it is a protocol error rather than a refusal.
+    /// Enforces the boundary for every file this process touches for this session, whether the
+    /// agent asked for it or the user attached it. `None` means no boundary could be established.
     pub guard: Option<Arc<wkbd_sec::path_guard::PathGuard>>,
+    /// Whether `fs/*` was advertised to this agent.
+    pub offer_client_fs: bool,
+}
+
+/// What the user attached, in the two forms the turn needs.
+///
+/// One struct rather than two arguments because they must not disagree: `blocks` is what the
+/// agent receives and `records` is what the transcript claims it received, and a caller that
+/// could pass one without the other could produce a turn that shows an attachment nobody sent.
+#[derive(Debug, Default, Clone)]
+pub struct Attached {
+    pub blocks: Vec<Value>,
+    pub records: Vec<wkbd_proto::Attachment>,
 }
 
 /// Routes a permission question to whoever answers it.
@@ -119,6 +132,7 @@ impl std::future::IntoFuture for PermissionWaiter {
 pub async fn run_turn(
     ctx: &TurnContext,
     prompt: &str,
+    attached: Attached,
     rx: &mut mpsc::UnboundedReceiver<Incoming>,
 ) -> Result<StopReason> {
     // Every permission this turn opened, so the ones still open at the end can be closed out.
@@ -146,16 +160,11 @@ pub async fn run_turn(
         }
     };
 
-    emit(ctx.handle.begin_turn(prompt).await).await;
+    emit(ctx.handle.begin_turn(prompt, attached.records).await).await;
 
     let conn = ctx.handle.connection();
     let session_id = ctx.handle.acp_session_id.clone();
-    let prelude = ctx.handle.prelude.render();
-    let mut blocks = Vec::new();
-    if !prelude.is_empty() {
-        blocks.push(json!({ "type": "text", "text": prelude }));
-    }
-    blocks.push(json!({ "type": "text", "text": prompt }));
+    let blocks = ctx.handle.prompt_blocks(prompt, attached.blocks);
 
     let prompt_task = tokio::spawn(async move {
         conn.request(
@@ -480,17 +489,24 @@ async fn handle_fs(
     method: &str,
     params: Value,
 ) -> Vec<EventPayload> {
-    let Some(guard) = &ctx.guard else {
-        let _ = ctx
-            .handle
-            .connection()
-            .respond_error(
-                &id,
-                -32601,
-                &format!("{method} was not offered by this client"),
-            )
-            .await;
-        return Vec::new();
+    // Two separate reasons to refuse, and they must produce the same answer. The agent asked for
+    // a method that either was never advertised, or has no boundary to enforce; in both cases the
+    // only safe reply is that we do not do this, and in neither case may the presence of a guard
+    // built for some other purpose turn into permission.
+    let guard = match (&ctx.guard, ctx.offer_client_fs) {
+        (Some(guard), true) => guard,
+        _ => {
+            let _ = ctx
+                .handle
+                .connection()
+                .respond_error(
+                    &id,
+                    -32601,
+                    &format!("{method} was not offered by this client"),
+                )
+                .await;
+            return Vec::new();
+        }
     };
 
     let outcome = if method == "fs/read_text_file" {

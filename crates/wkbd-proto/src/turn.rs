@@ -83,6 +83,8 @@ pub struct FileAccessRecord {
 pub struct TurnView {
     pub turn: u64,
     pub prompt: String,
+    /// What the user attached, and how each one actually reached the agent.
+    pub attachments: Vec<crate::Attachment>,
     pub items: Vec<TurnItem>,
     pub stop_reason: Option<StopReason>,
     /// True when any chunk in this turn lacked an agent-supplied `messageId`, i.e. the
@@ -149,10 +151,11 @@ impl ViewBuilder {
 
     pub fn apply(&mut self, payload: &EventPayload) {
         match payload {
-            EventPayload::TurnStarted { turn, prompt } => {
+            EventPayload::TurnStarted { turn, prompt, attachments } => {
                 self.turns.push(TurnView {
                     turn: *turn,
                     prompt: prompt.clone(),
+                    attachments: attachments.clone(),
                     items: Vec::new(),
                     stop_reason: None,
                     segmentation_best_effort: false,
@@ -411,7 +414,7 @@ mod file_access_view_tests {
     #[test]
     fn an_allowed_write_appears_in_the_turn() {
         let view = built(&[
-            EventPayload::TurnStarted { turn: 1, prompt: "go".into() },
+            EventPayload::TurnStarted { turn: 1, prompt: "go".into(), attachments: vec![] },
             access("/w/a.rs", true),
         ]);
         assert!(
@@ -428,7 +431,7 @@ mod file_access_view_tests {
     #[test]
     fn a_refusal_appears_in_the_turn_with_its_reason() {
         let view = built(&[
-            EventPayload::TurnStarted { turn: 1, prompt: "go".into() },
+            EventPayload::TurnStarted { turn: 1, prompt: "go".into(), attachments: vec![] },
             access("/etc/passwd", false),
         ]);
         let found = view.items.iter().find_map(|i| match i {
@@ -448,7 +451,7 @@ mod file_access_view_tests {
     #[test]
     fn accesses_keep_their_place_relative_to_everything_else() {
         let view = built(&[
-            EventPayload::TurnStarted { turn: 1, prompt: "go".into() },
+            EventPayload::TurnStarted { turn: 1, prompt: "go".into(), attachments: vec![] },
             access("/w/first.rs", true),
             EventPayload::ToolCallStarted {
                 tool_call_id: "t1".into(),

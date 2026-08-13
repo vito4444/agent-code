@@ -115,7 +115,7 @@ async fn run_turn(
         .await
         .expect("open session");
 
-    let mut payloads = handle.begin_turn(prompt).await;
+    let mut payloads = handle.begin_turn(prompt, vec![]).await;
 
     let conn = handle.connection();
     let sid = handle.acp_session_id.clone();
@@ -409,7 +409,7 @@ async fn a_process_that_dies_mid_request_fails_the_request_instead_of_hanging() 
     // stdout closes, this await would never return.
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        handle.send_prompt("do something"),
+        handle.send_prompt("do something", vec![]),
     )
     .await;
 
@@ -439,7 +439,7 @@ async fn cancelling_settles_the_open_tool_call() {
         .await
         .unwrap();
 
-    let mut payloads = handle.begin_turn("run the suite").await;
+    let mut payloads = handle.begin_turn("run the suite", vec![]).await;
     let conn = handle.connection();
     let sid = handle.acp_session_id.clone();
     let prompt_task = tokio::spawn(async move {

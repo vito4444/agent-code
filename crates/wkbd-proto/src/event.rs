@@ -182,13 +182,63 @@ pub struct PlanEntryView {
     pub status: String,
 }
 
+/// What the agent said it can be given in a prompt.
+///
+/// Text and resource links are the protocol's baseline and every agent must accept them, so
+/// they are not represented here — there is nothing to negotiate. The three that are here are
+/// the ones an agent may not support, and each one that is false has to remove a control from
+/// the composer rather than degrade quietly: a prompt carrying a content block the agent never
+/// advertised is a protocol violation, and the agents that do not simply error are worse,
+/// because they drop the block and answer as if the user attached nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptCapabilities {
+    pub image: bool,
+    pub audio: bool,
+    pub embedded_context: bool,
+}
+
+/// How an attachment actually reached the agent.
+///
+/// Recorded, and shown, because the two are not interchangeable. `Embedded` means the agent was
+/// handed the bytes and cannot fail to see them. `Link` means it was handed a path and has to go
+/// and read it — which it may lack the tools, the permission or the inclination to do. An
+/// attachment that silently became a link is the failure mode worth naming: the user believes
+/// the file is in the conversation, the agent never opened it, and the answer that comes back
+/// looks like the model ignoring instructions rather than a capability gap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SentAs {
+    Embedded,
+    Image,
+    Link,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attachment {
+    /// `file:///absolute/path`, the URI the agent was given.
+    pub uri: String,
+    /// Relative to the project root, which is what the user typed and can recognize.
+    pub name: String,
+    pub sent_as: SentAs,
+    pub bytes: Option<u64>,
+    /// Why it went as a link when it could have been embedded: `too-large`, `not-text`,
+    /// `directory`, `agent-cannot-embed`. `None` when nothing was given up.
+    pub degraded: Option<String>,
+}
+
 // Tagged with `event` rather than `kind`: several variants carry their own `kind` field
 // (a tool call's ToolKind, a segment's SegmentKind) and an internal tag may not collide
 // with a variant field name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum EventPayload {
-    TurnStarted { turn: u64, prompt: String },
+    /// `attachments` defaults so that turns recorded before mentions existed still read back.
+    TurnStarted {
+        turn: u64,
+        prompt: String,
+        #[serde(default)]
+        attachments: Vec<Attachment>,
+    },
     TurnEnded { turn: u64, stop_reason: StopReason },
 
     SegmentStarted { segment: SegmentId, kind: SegmentKind },

@@ -14,7 +14,8 @@
 use serde_json::Value;
 use wkbd_proto::{
     ConfigChoice, ConfigOptionView, ConfigValueView, CostView, PermissionOption,
-    PermissionOptionKind, PlanEntryView, RawUpdate, SegmentKind, StopReason, ToolContent,
+    PermissionOptionKind, PlanEntryView, PromptCapabilities, RawUpdate, SegmentKind, StopReason,
+    ToolContent,
     ToolKind, ToolLocation, ToolStatus,
 };
 
@@ -134,6 +135,28 @@ pub fn parse_permission_options(items: Option<&Value>) -> Vec<PermissionOption> 
             Some(PermissionOption { option_id, name, kind })
         })
         .collect()
+}
+
+/// Reads `agentCapabilities.promptCapabilities` out of the `initialize` response.
+///
+/// Everything absent means unsupported, which the specification is explicit about: a capability
+/// omitted from the handshake **MUST** be treated as unsupported, precisely so that adding one
+/// later is not a breaking change. So this is one of the few places where a missing field must
+/// not be read generously — a wrong `true` here puts a content block on the wire that the agent
+/// never agreed to accept.
+///
+/// Note what is *not* here. Text and resource links are the baseline every agent must accept, so
+/// there is no capability to read and no control to hide.
+pub fn parse_prompt_capabilities(init_result: &Value) -> PromptCapabilities {
+    let caps = init_result.get("agentCapabilities").and_then(|c| c.get("promptCapabilities"));
+    let flag = |name: &str| {
+        caps.and_then(|c| c.get(name)).and_then(|v| v.as_bool()).unwrap_or(false)
+    };
+    PromptCapabilities {
+        image: flag("image"),
+        audio: flag("audio"),
+        embedded_context: flag("embeddedContext"),
+    }
 }
 
 /// Parses the `configOptions` array from `session/new` or a `config_option_update`.

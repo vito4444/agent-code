@@ -18,6 +18,7 @@ use std::sync::Arc;
 use wkbd_agent::SessionPurpose;
 use wkbd_memory::rules::{NewRule, RuleScope};
 
+use crate::mentions;
 use crate::runner::{run_turn, AskUser, PermissionWaiter, TurnContext};
 use crate::state::AppState;
 
@@ -27,6 +28,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/agents", get(list_agents))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}/prompt", post(prompt))
+        .route("/api/sessions/{id}/paths", get(session_paths))
         .route("/api/sessions/{id}/cancel", post(cancel))
         .route("/api/sessions/{id}/permission", post(answer_permission))
         .route("/api/sessions/{id}/config", post(set_config))
@@ -129,20 +131,28 @@ struct SessionSummary {
     agent_display_name: String,
     project_root: String,
     title: Option<String>,
+    /// What this agent said it can be handed in a prompt. Per session rather than per agent
+    /// because it is negotiated at `initialize`, and the same binary launched with a different
+    /// model can answer differently.
+    prompt_capabilities: wkbd_proto::PromptCapabilities,
 }
 
-async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let sessions = state.sessions.read().await;
-    let out: Vec<SessionSummary> = sessions
-        .values()
-        .map(|s| SessionSummary {
+impl SessionSummary {
+    fn of(s: &crate::state::LiveSession) -> Self {
+        Self {
             id: s.handle.local_id.clone(),
             agent_id: s.agent_id.clone(),
             agent_display_name: s.agent_display_name.clone(),
             project_root: s.project_root.clone(),
             title: s.title.clone(),
-        })
-        .collect();
+            prompt_capabilities: s.handle.prompt_capabilities(),
+        }
+    }
+}
+
+async fn list_sessions(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let sessions = state.sessions.read().await;
+    let out: Vec<SessionSummary> = sessions.values().map(|s| SessionSummary::of(s)).collect();
     Json(out)
 }
 
@@ -161,18 +171,18 @@ async fn create_session(
         .await
         .map_err(ApiError::internal)?;
 
-    Ok(Json(SessionSummary {
-        id: session.handle.local_id.clone(),
-        agent_id: session.agent_id.clone(),
-        agent_display_name: session.agent_display_name.clone(),
-        project_root: session.project_root.clone(),
-        title: session.title.clone(),
-    }))
+    Ok(Json(SessionSummary::of(&session)))
 }
 
 #[derive(Deserialize)]
 struct PromptBody {
     text: String,
+    /// Project-relative paths the user attached, in the order they should reach the agent.
+    ///
+    /// Relative, never absolute: an absolute path from the client is a path the client chose,
+    /// and the guard exists so that no client choice decides what gets opened.
+    #[serde(default)]
+    mentions: Vec<String>,
 }
 
 async fn prompt(
@@ -181,6 +191,10 @@ async fn prompt(
     Json(body): Json<PromptBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let session = state.session(&id).await.ok_or_else(ApiError::not_found)?;
+
+    // Before the session is marked busy, because this can fail and a failure here must not
+    // leave a session that never started a turn unable to start one.
+    let attached = resolve_mentions(&session, &body)?;
 
     {
         // One turn at a time per session. The protocol has no way to inject into a running
@@ -207,15 +221,97 @@ async fn prompt(
             project_root: session2.project_root.clone(),
             ask_user: Arc::new(PendingPrompt::new(state2.clone())),
             guard: session2.guard.clone(),
+            offer_client_fs: session2.offer_client_fs,
         };
         let mut inbox = session2.inbox.lock().await;
-        if let Err(e) = run_turn(&ctx, &text, &mut inbox).await {
+        if let Err(e) = run_turn(&ctx, &text, attached, &mut inbox).await {
             tracing::error!(error = %e, "turn failed");
         }
         *session2.busy.lock().await = false;
     });
 
     Ok(StatusCode::ACCEPTED)
+}
+
+/// Resolves the attachments for one prompt into wire blocks and transcript records.
+///
+/// The union of what the composer sent and what the text contains, in the order the paths appear.
+/// Two sources because they can disagree: the composer knows what was picked from the completion
+/// list, and the text is what the user actually left in the box after editing it. Trusting only
+/// the list attaches a file the user deleted from the message; trusting only the text loses a
+/// mention whose path has a space in it. Taking both, deduplicated, is wrong in neither direction.
+fn resolve_mentions(
+    session: &Arc<crate::state::LiveSession>,
+    body: &PromptBody,
+) -> Result<crate::runner::Attached, ApiError> {
+    let mut wanted: Vec<String> = Vec::new();
+    for path in body.mentions.iter().cloned().chain(mentions::scan_text(&body.text)) {
+        if !wanted.contains(&path) {
+            wanted.push(path);
+        }
+    }
+    if wanted.is_empty() {
+        return Ok(crate::runner::Attached::default());
+    }
+
+    let Some(guard) = &session.guard else {
+        return Err(ApiError::bad_request(
+            "this session has no filesystem boundary, so nothing can be attached to it",
+        ));
+    };
+
+    // Hand-typed `@words` that are not paths are dropped rather than refused: someone writing
+    // "ask @alice about this" has not made a mistake, and failing their prompt over it would be
+    // maddening. A path that came from the completion list is a different matter — the user
+    // chose a real file, so if it cannot be read now, saying so beats sending a prompt that
+    // refers to a file the agent never got.
+    let typed_only: Vec<String> =
+        mentions::scan_text(&body.text).into_iter().filter(|p| !body.mentions.contains(p)).collect();
+
+    let root = mentions::root_of(&session.project_root);
+    let caps = session.handle.prompt_capabilities();
+
+    let mut blocks = Vec::new();
+    let mut records = Vec::new();
+    for path in wanted {
+        match mentions::resolve(guard, &root, std::slice::from_ref(&path), caps) {
+            Ok(mut r) => {
+                blocks.append(&mut r.blocks);
+                records.append(&mut r.attachments);
+            }
+            Err(e) if typed_only.contains(&path) => {
+                tracing::debug!(%path, error = %e, "an @word in the message is not a file");
+            }
+            Err(e) => return Err(ApiError::bad_request(&e.to_string())),
+        }
+    }
+
+    Ok(crate::runner::Attached { blocks, records })
+}
+
+#[derive(Deserialize)]
+struct PathQuery {
+    #[serde(default)]
+    q: String,
+}
+
+/// Files under a session's project root, for the composer's `@` completion.
+///
+/// Scoped to a session rather than taking a root as a parameter, so that the set of directories
+/// this endpoint will ever enumerate is exactly the set the user already opened a session on.
+/// A `?root=` parameter would make the daemon a general-purpose filesystem browser for anything
+/// that can reach the port.
+async fn session_paths(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(q): Query<PathQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let session = state.session(&id).await.ok_or_else(ApiError::not_found)?;
+    let root = mentions::root_of(&session.project_root);
+    let entries = tokio::task::spawn_blocking(move || mentions::search(&root, &q.q, 40))
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(entries))
 }
 
 /// The queue of things the system wants to tell itself.

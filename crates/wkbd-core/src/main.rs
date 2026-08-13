@@ -15,6 +15,7 @@
 mod api;
 mod fs_bridge;
 mod learn;
+mod mentions;
 mod planner;
 mod route;
 mod run;

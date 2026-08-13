@@ -30,10 +30,22 @@ pub struct InspectorFrame {
 
 pub struct LiveSession {
     pub handle: Arc<SessionHandle>,
-    /// Enforces the filesystem boundary for anything we do on this agent's behalf. `None` when
-    /// client-side file access is not offered, in which case the agent does its own I/O and we
-    /// see none of it.
+    /// Enforces the filesystem boundary for anything this daemon reads or writes for this
+    /// session. `None` only when the boundary could not be established at all, in which case
+    /// everything that would need it is refused.
+    ///
+    /// Deliberately not the same thing as the `--no-client-fs` policy below. It used to be: the
+    /// guard was `None` whenever we declined to proxy for the agent, which conflated "there is no
+    /// boundary" with "the agent may not ask us to cross it". They diverge as soon as anything
+    /// other than the agent needs to read a file — attaching one to a prompt is the user reading
+    /// their own file, and switching off the agent's proxy should not disable the user's paperclip.
     pub guard: Option<Arc<PathGuard>>,
+    /// Whether `fs/*` was advertised to this agent, and so whether we honour it.
+    ///
+    /// Checked separately from the guard because an agent that calls a method we never advertised
+    /// must get the same refusal either way — a capability that works when unadvertised is a
+    /// capability nobody audited.
+    pub offer_client_fs: bool,
     pub agent_id: String,
     pub agent_display_name: String,
     pub project_root: String,
@@ -148,23 +160,20 @@ impl AppState {
         // Rooted at the project, and only at the project. Extra roots are a deliberate, auditable
         // decision rather than something an agent can ask for: the protocol lets it name any
         // absolute path, so the set of roots is the entire boundary.
-        let guard = if self.offer_client_fs {
-            match PathGuard::new(vec![std::path::PathBuf::from(project_root)]) {
-                Ok(g) => Some(Arc::new(g)),
-                Err(e) => {
-                    // Refusing to offer the capability is the fail-closed direction. Offering it
-                    // with no working guard would be the one combination that must never happen.
-                    tracing::error!(error = %e, "could not build a path guard; not offering fs/*");
-                    None
-                }
+        let guard = match PathGuard::new(vec![std::path::PathBuf::from(project_root)]) {
+            Ok(g) => Some(Arc::new(g)),
+            Err(e) => {
+                // Fail closed. A session with no working guard still runs — the agent can do its
+                // own I/O — but nothing in this process will touch a file for it.
+                tracing::error!(error = %e, "could not build a path guard; fs/* and attachments are off");
+                None
             }
-        } else {
-            None
         };
 
         let (inbox_tx, inbox_rx) = mpsc::unbounded_channel();
         let session = Arc::new(LiveSession {
             guard,
+            offer_client_fs: self.offer_client_fs,
             agent_id: spec.id.clone(),
             agent_display_name: spec.display_name.clone(),
             project_root: project_root.to_string(),

@@ -917,12 +917,13 @@ impl RunEngine {
             // — not the prompt.
             ask_user: Arc::new(crate::runner::AutoAllow),
             guard: session.guard.clone(),
+            offer_client_fs: session.offer_client_fs,
         };
 
         let prompt = task_prompt(task);
         let stop = {
             let mut inbox = session.inbox.lock().await;
-            crate::runner::run_turn(&ctx, &prompt, &mut inbox).await?
+            crate::runner::run_turn(&ctx, &prompt, Default::default(), &mut inbox).await?
         };
 
         let commit = wkbd_vcs::worktree::commit_all(

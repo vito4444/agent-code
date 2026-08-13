@@ -40,7 +40,7 @@ fn tool(id: &str, status: ToolStatus) -> RawUpdate {
 /// Drives a whole turn and returns the flat payload stream.
 fn run(updates: Vec<RawUpdate>, stop: StopReason) -> Vec<EventPayload> {
     let mut n = Normalizer::new();
-    let mut out = n.begin_turn("do the thing");
+    let mut out = n.begin_turn("do the thing", vec![]);
     for u in updates {
         out.extend(n.push(u));
     }
@@ -104,7 +104,7 @@ fn multiple_thoughts_in_one_turn_never_expand_together() {
 #[test]
 fn only_the_newest_segment_is_live_mid_turn() {
     let mut n = Normalizer::new();
-    let mut acc = n.begin_turn("go");
+    let mut acc = n.begin_turn("go", vec![]);
     acc.extend(n.push(thought(Some("m1"), "a")));
     acc.extend(n.push(tool("t1", ToolStatus::InProgress)));
     acc.extend(n.push(thought(Some("m2"), "b")));
@@ -243,9 +243,9 @@ fn a_second_begin_turn_does_not_leak_a_live_segment() {
     // Guards against the shape where an agent errors out and the caller starts a new turn
     // without an explicit end. The previous turn's spinner must not run forever.
     let mut n = Normalizer::new();
-    let mut acc = n.begin_turn("one");
+    let mut acc = n.begin_turn("one", vec![]);
     acc.extend(n.push(thought(Some("m1"), "half a thought")));
-    acc.extend(n.begin_turn("two"));
+    acc.extend(n.begin_turn("two", vec![]));
 
     assert_eq!(max_concurrent_live(&acc), 1);
     let turns = view(&acc);
@@ -258,7 +258,7 @@ fn tool_call_update_for_an_unseen_call_creates_it() {
     // v2 makes the first update create the call, and v1 agents in the wild sometimes send
     // an update we have no `tool_call` for. Dropping it would silently lose a diff.
     let mut n = Normalizer::new();
-    let mut acc = n.begin_turn("go");
+    let mut acc = n.begin_turn("go", vec![]);
     acc.extend(n.push(RawUpdate::ToolCallUpdate {
         tool_call_id: "orphan".into(),
         title: Some("edit main.rs".into()),
@@ -292,7 +292,7 @@ fn unknown_session_update_is_recorded_not_dropped() {
     // ACP documents that the variant set is not exhaustive. An unmodelled variant has to
     // land somewhere visible, or a future protocol change looks like silence.
     let mut n = Normalizer::new();
-    let mut acc = n.begin_turn("go");
+    let mut acc = n.begin_turn("go", vec![]);
     acc.extend(n.push(RawUpdate::Unknown {
         discriminant: "future_thing".into(),
         raw: r#"{"sessionUpdate":"future_thing","x":1}"#.into(),
@@ -377,7 +377,7 @@ fn live_invariant_holds_under_randomized_interleaving() {
 
     for case in 0..200 {
         let mut n = Normalizer::new();
-        let mut acc = n.begin_turn("fuzz");
+        let mut acc = n.begin_turn("fuzz", vec![]);
         let len = 3 + (next() % 25) as usize;
         for i in 0..len {
             let pick = next() % 6;

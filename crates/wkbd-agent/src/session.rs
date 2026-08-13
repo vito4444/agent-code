@@ -20,7 +20,7 @@ use tokio::sync::Mutex;
 use crate::conn::Connection;
 use crate::pool::{AgentPool, AgentSpec, LaunchConfig, ProcessKey};
 use crate::wire;
-use wkbd_proto::{ConfigOptionView, EventPayload, Normalizer, StopReason};
+use wkbd_proto::{ConfigOptionView, EventPayload, Normalizer, PromptCapabilities, StopReason};
 
 /// Every way a session can come into existence.
 ///
@@ -151,6 +151,7 @@ pub struct SessionHandle {
     conn: Arc<Connection>,
     normalizer: Arc<Mutex<Normalizer>>,
     spec: AgentSpec,
+    prompt_capabilities: PromptCapabilities,
 }
 
 pub struct PromptOutcome {
@@ -168,8 +169,12 @@ impl SessionHandle {
     }
 
     /// Begins a turn and returns the events that opening it produced.
-    pub async fn begin_turn(&self, prompt: &str) -> Vec<EventPayload> {
-        self.normalizer.lock().await.begin_turn(prompt)
+    pub async fn begin_turn(
+        &self,
+        prompt: &str,
+        attachments: Vec<wkbd_proto::Attachment>,
+    ) -> Vec<EventPayload> {
+        self.normalizer.lock().await.begin_turn(prompt, attachments)
     }
 
     /// Feeds one raw `session/update` payload through normalization.
@@ -227,19 +232,41 @@ impl SessionHandle {
         self.normalizer.lock().await.segmentation_is_best_effort()
     }
 
+    /// Assembles the content blocks for one prompt: prelude, attachments, then the message.
+    ///
+    /// The only place that builds them. It was two places, and the duplicate was a live hazard
+    /// rather than untidiness: the prelude carries the user's standing rules, so a second
+    /// assembly site is a second chance to ship a path where the rules quietly do not apply.
+    /// The same is now true of attachments.
+    ///
+    /// Order is deliberate. The prelude leads because standing instructions should be read
+    /// before the material they apply to. Attachments come before the message so the message
+    /// can refer to them in the past tense — an agent reading "fix the bug in this file"
+    /// followed by the file has to hold the request open until the context arrives.
+    pub fn prompt_blocks(&self, text: &str, attachments: Vec<Value>) -> Vec<Value> {
+        let mut blocks = Vec::new();
+        let prelude = self.prelude.render();
+        if !prelude.is_empty() {
+            blocks.push(json!({ "type": "text", "text": prelude }));
+        }
+        blocks.extend(attachments);
+        blocks.push(json!({ "type": "text", "text": text }));
+        blocks
+    }
+
+    /// What the agent said it can accept in a prompt, read from the `initialize` response.
+    pub fn prompt_capabilities(&self) -> PromptCapabilities {
+        self.prompt_capabilities
+    }
+
     /// Sends the prompt. Returns when the agent answers with a stop reason.
     ///
     /// The response arriving is the only authoritative end-of-turn signal. Nothing in this
     /// codebase infers the end of a turn from the stream going quiet, because "the model
     /// paused between tool calls" and "the turn is over" look identical from outside and
     /// confusing them is what makes queued messages arrive in the middle of a turn.
-    pub async fn send_prompt(&self, text: &str) -> Result<StopReason> {
-        let mut blocks = Vec::new();
-        let prelude = self.prelude.render();
-        if !prelude.is_empty() {
-            blocks.push(json!({ "type": "text", "text": prelude }));
-        }
-        blocks.push(json!({ "type": "text", "text": text }));
+    pub async fn send_prompt(&self, text: &str, attachments: Vec<Value>) -> Result<StopReason> {
+        let blocks = self.prompt_blocks(text, attachments);
 
         let res = self
             .conn
@@ -309,16 +336,22 @@ impl SessionFactory {
         let conn = self.pool.acquire(&req.spec, &req.config, build_command).await?;
         let process_key = AgentPool::key_for(&req.spec, &req.config);
 
-        conn.request(
-            "initialize",
-            json!({
-                "protocolVersion": 1,
-                "clientCapabilities": req.client_capabilities,
-                "clientInfo": { "name": "wkbd", "version": env!("CARGO_PKG_VERSION") },
-            }),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("initialize failed: {e}"))?;
+        let init = conn
+            .request(
+                "initialize",
+                json!({
+                    "protocolVersion": 1,
+                    "clientCapabilities": req.client_capabilities,
+                    "clientInfo": { "name": "wkbd", "version": env!("CARGO_PKG_VERSION") },
+                }),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("initialize failed: {e}"))?;
+
+        // The response used to be discarded. Everything the agent says it can be given lives in
+        // it, so discarding it meant the composer could only ever offer the baseline — and worse,
+        // that any later attempt to offer more would have to guess.
+        let prompt_capabilities = wire::parse_prompt_capabilities(&init);
 
         // Resume where possible so history is not lost, but fall back to a new session
         // rather than failing: an agent that cannot load a session should still be usable.
@@ -365,6 +398,7 @@ impl SessionFactory {
             conn,
             normalizer: Arc::new(Mutex::new(Normalizer::new())),
             spec: req.spec,
+            prompt_capabilities,
         })
     }
 

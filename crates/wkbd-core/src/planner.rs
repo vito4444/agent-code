@@ -461,11 +461,12 @@ impl AgentPlanner {
             // constrains it is the path guard rooted at the project.
             ask_user: std::sync::Arc::new(crate::runner::AutoAllow),
             guard: session.guard.clone(),
+            offer_client_fs: session.offer_client_fs,
         };
 
         {
             let mut inbox = session.inbox.lock().await;
-            crate::runner::run_turn(&ctx, prompt, &mut inbox).await?;
+            crate::runner::run_turn(&ctx, prompt, Default::default(), &mut inbox).await?;
         }
 
         let (events, _) = self

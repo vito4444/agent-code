@@ -30,6 +30,11 @@ tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
+ignore = "0.4.33"
+base64 = "0.23.1"
 
 [dev-dependencies]
 tempfile.workspace = true
+# Only for the conformance test: the blocks we build for attachments are hand-rolled JSON, and
+# deserializing them into the official types is what stops them drifting out of spec silently.
+agent-client-protocol.workspace = true

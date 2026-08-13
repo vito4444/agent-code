@@ -229,7 +229,7 @@ pub async fn probe_agent(
     if let Some(prompt) = prompt {
         report.turn_observed = true;
         let mut normalizer = Normalizer::new();
-        let mut payloads = normalizer.begin_turn(prompt);
+        let mut payloads = normalizer.begin_turn(prompt, vec![]);
 
         let prompt_conn = conn.clone();
         let sid = session_id.clone();
