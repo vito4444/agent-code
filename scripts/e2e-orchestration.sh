@@ -686,6 +686,119 @@ check "work that finished keeps its branch" "true" \
 kill "$DAEMON3_PID" 2>/dev/null || true
 wait "$DAEMON3_PID" 2>/dev/null || true
 
+# ---------------------------------------------------------------- distillation
+#
+# The third learning loop, end to end: the same shape of work succeeding on three separate
+# occasions becomes a procedure waiting for approval. Three runs rather than one with three
+# tasks, because the gate counts occasions and sibling tasks from one planner are one.
+#
+# Nothing is merged in between. Learning happens when a run reaches its candidate — whether a
+# person accepts it says nothing about which acceptance checks passed.
+echo
+echo "distillation"
+DIST_STATE=$(mktemp -d)
+DPORT=$((PORT + 5))
+DREPO="$WORK/distrepo"
+mkdir -p "$DREPO/src" "$DREPO/tests"
+cat > "$DREPO/tests/check.sh" <<'CHECK'
+#!/bin/sh
+[ -f src/mod.rs ] && echo "test unit::x ... ok"
+echo "test result: ok. done"
+CHECK
+(
+    cd "$DREPO" && git init -q . && git config user.email t@e && git config user.name t
+    git add -A && git commit -q -m initial
+)
+# One graph per planner call, and there are four runs below. The fixed planner hands out its
+# list in order and refuses when it runs dry, which is the behaviour that makes it a test double
+# rather than a stub: a planner that silently repeated itself would hide a run that asked twice.
+python3 - "$WORK/distplan.json" <<'DISTPLAN'
+import json, sys
+plan = {"goal": "one small change", "tasks": [{
+    "id": "only", "title": "write a module",
+    "body": "WRITE src/mod.rs <<<pub fn f() {}\n>>>",
+    "declared_paths": ["src/mod.rs"], "depends_on": [],
+    "verify": {"cmd": "sh tests/check.sh", "must_pass": ["unit::x"],
+               "immutable_paths": ["tests/**"]}}]}
+open(sys.argv[1], "w").write(json.dumps([plan] * 4))
+DISTPLAN
+
+"$ROOT/target/debug/wkbd-core" \
+    --state-dir "$DIST_STATE" --listen "127.0.0.1:$DPORT" \
+    --agent "worker=Worker=$ROOT/target/debug/fake-acp-agent --profile worker" \
+    --worker-agent worker --fixed-plan "$WORK/distplan.json" > "$WORK/daemon-distil.log" 2>&1 &
+DDAEMON_PID=$!
+for _ in $(seq 1 80); do
+    curl -sf "http://127.0.0.1:$DPORT/api/health" > /dev/null 2>&1 && break
+    sleep 0.25
+done
+if ! curl -sf "http://127.0.0.1:$DPORT/api/health" > /dev/null 2>&1; then
+    echo "FAIL the distillation daemon did not start"
+    tail -20 "$WORK/daemon-distil.log" 2>/dev/null
+    FAILED=1
+fi
+
+proposals_of_kind() {
+    curl -sf "http://127.0.0.1:$DPORT/api/proposals" \
+        | jq -r --arg k "$1" '[.proposals[]|select(.kind==$k)]|length'
+}
+
+for n in 1 2 3; do
+    DRID=$(curl -sf -X POST "http://127.0.0.1:$DPORT/api/runs" -H 'content-type: application/json' \
+        -d "{\"goal\":\"small change $n\",\"project_root\":\"$DREPO\"}" | jq -r '.id // empty')
+    for _ in $(seq 1 80); do
+        DSTATUS=$(curl -sf "http://127.0.0.1:$DPORT/api/runs" \
+            | jq -r --arg id "$DRID" '.runs[]|select(.id==$id)|.status')
+        [ "$DSTATUS" = "awaiting_merge" ] && break
+        case "$DSTATUS" in failed|cancelled) break ;; esac
+        sleep 0.3
+    done
+    check "run $n reached a candidate" "awaiting_merge" "${DSTATUS:-none}"
+
+    # Learning is spawned rather than awaited, so the run reports its result without waiting on it.
+    sleep 2
+    if [ "$n" -lt 3 ]; then
+        # The gate is three occasions, so two must not be enough. Asserted rather than assumed:
+        # a distiller that fires on the first run would pass the final check below just as well.
+        check "nothing is distilled after $n run(s)" "0" "$(proposals_of_kind workflow)"
+    fi
+done
+
+check "the third occasion distils a procedure" "1" "$(proposals_of_kind workflow)"
+
+DPID=$(curl -sf "http://127.0.0.1:$DPORT/api/proposals" \
+    | jq -r '[.proposals[]|select(.kind=="workflow")]|first|.id')
+DREVIEW=$(curl -sf "http://127.0.0.1:$DPORT/api/proposals/$DPID")
+check "it cites all three runs" "3" \
+    "$(echo "$DREVIEW" | jq -r '.evidence.supporting_runs|length')"
+check "the evidence is the acceptance command, not a claim" "true" \
+    "$(echo "$DREVIEW" | jq -r '[.evidence.verified_signals[]|select(test("check.sh"))]|length >= 3')"
+# The step it recorded is the one the worker actually took, through the client's file methods.
+check "the procedure names what the worker did" "true" \
+    "$(echo "$DREVIEW" | jq -r '.body_for_human|test("write \\*.rs")')"
+
+# Running again must not queue it a second time. A queue that regrows after every run stops
+# being read, and this is the loop most able to regrow it.
+DRID=$(curl -sf -X POST "http://127.0.0.1:$DPORT/api/runs" -H 'content-type: application/json' \
+    -d "{\"goal\":\"small change 4\",\"project_root\":\"$DREPO\"}" | jq -r '.id // empty')
+for _ in $(seq 1 80); do
+    DSTATUS=$(curl -sf "http://127.0.0.1:$DPORT/api/runs" \
+        | jq -r --arg id "$DRID" '.runs[]|select(.id==$id)|.status')
+    [ "$DSTATUS" = "awaiting_merge" ] && break
+    sleep 0.3
+done
+sleep 2
+check "a fourth run does not queue it again" "1" "$(proposals_of_kind workflow)"
+
+# And it is still a proposal: nothing reached the playbook without a person.
+check "it is waiting, not in effect" "true" \
+    "$(curl -sf "http://127.0.0.1:$DPORT/api/proposals" | jq -r --arg i "$DPID" \
+        '[.proposals[]|select(.id==$i)]|length == 1')"
+
+kill "$DDAEMON_PID" 2>/dev/null || true
+wait "$DDAEMON_PID" 2>/dev/null || true
+rm -rf "$DIST_STATE"
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "orchestration works end to end"

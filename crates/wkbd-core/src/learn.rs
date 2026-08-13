@@ -53,13 +53,13 @@ pub async fn from_run(store: &Store, run_id: &str, project_root: &str) {
 /// second finding returns the first row instead of growing the queue.
 async fn distil_procedures(store: &Store, project_root: &str) -> Result<()> {
     let traces = crate::trace::traces_for_project(store, project_root).await?;
-    if traces.is_empty() {
-        return Ok(());
-    }
-
     let candidates = wkbd_evolve::distill::distill(&traces, &DistillPolicy::default());
     if candidates.is_empty() {
-        tracing::debug!(
+        // Logged rather than returned early and silently, and the trace count is in it. Nothing
+        // to distil and nothing to distil *from* look identical from outside, and the second is
+        // a defect — the first version of this read a table that has never had a row written to
+        // it, found no tasks, and reported exactly as much as a healthy quiet run does.
+        tracing::info!(
             project = %project_root,
             traces = traces.len(),
             "nothing repeated often enough to distil"

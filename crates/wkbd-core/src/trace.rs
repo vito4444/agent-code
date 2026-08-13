@@ -35,10 +35,9 @@
 //! they worked.
 
 use anyhow::Result;
-use serde_json::Value;
 use std::collections::BTreeSet;
 use wkbd_evolve::distill::{RunSummary, Signal};
-use wkbd_proto::{EventPayload, ToolKind};
+use wkbd_proto::{EventPayload, FileOp, RunEvent, ToolKind};
 use wkbd_store::Store;
 
 /// How many finished tasks are considered. A bound on work, not on quality: distillation runs at
@@ -46,14 +45,18 @@ use wkbd_store::Store;
 /// behind it must not make the last event of a run wait on all of them.
 const MAX_TASKS: usize = 400;
 
-/// One finished task, as the store has it.
+/// One finished task, as the run's event stream has it.
+///
+/// Reconstructed from events rather than read from the `tasks` table, which looks like the
+/// obvious source and is empty: nothing has ever written to it. The durable workflow checkpoints
+/// into `step_outputs` and everything a reader needs is in the log, which is where the rest of
+/// this system takes its answers from anyway.
 struct FinishedTask {
     run_id: String,
     task_id: String,
     passed: bool,
     declared_paths: Vec<String>,
     verify_cmd: String,
-    worktree_path: String,
 }
 
 /// Every finished task in this project, as summaries the distiller can group.
@@ -62,7 +65,7 @@ pub async fn traces_for_project(store: &Store, project_root: &str) -> Result<Vec
     let mut out = Vec::with_capacity(tasks.len());
 
     for task in tasks {
-        let steps = match session_for(store, &task.worktree_path).await? {
+        let steps = match session_for(store, &task.run_id, &task.task_id).await? {
             Some(session) => steps_in_session(store, &session)?,
             // A task with no session did no work we can describe. Keeping it with empty steps
             // would put it in the "no steps" bucket the distiller already skips, so it is dropped
@@ -101,58 +104,86 @@ pub async fn traces_for_project(store: &Store, project_root: &str) -> Result<Vec
 }
 
 async fn finished_tasks(store: &Store, project_root: &str) -> Result<Vec<FinishedTask>> {
+    let mut out = Vec::new();
+    for run_id in runs_of_project(store, project_root).await? {
+        out.extend(tasks_in_run(store, &run_id)?);
+        if out.len() >= MAX_TASKS {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+async fn runs_of_project(store: &Store, project_root: &str) -> Result<Vec<String>> {
     let root = project_root.to_string();
     store
         .read(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT t.run_id, t.id, t.status, t.declared_paths, t.verify_spec, t.worktree_path
-                 FROM tasks t
-                 JOIN runs r ON r.id = t.run_id
-                 WHERE r.project_root = ?1
-                   AND t.status IN ('completed', 'failed')
-                   AND t.worktree_path IS NOT NULL
-                 ORDER BY t.created_ms DESC
-                 LIMIT ?2",
+                "SELECT id FROM runs WHERE project_root = ?1 ORDER BY created_ms DESC LIMIT 200",
             )?;
-            let rows = stmt.query_map(rusqlite::params![root, MAX_TASKS as i64], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, String>(5)?,
-                ))
-            })?;
-
+            let rows = stmt.query_map([&root], |r| r.get::<_, String>(0))?;
             let mut out = Vec::new();
-            for row in rows {
-                let (run_id, task_id, status, paths, spec, worktree) = row?;
-                out.push(FinishedTask {
-                    run_id,
-                    task_id,
-                    passed: status == "completed",
-                    declared_paths: serde_json::from_str(&paths).unwrap_or_default(),
-                    verify_cmd: serde_json::from_str::<Value>(&spec)
-                        .ok()
-                        .and_then(|v| v.get("cmd").and_then(|c| c.as_str()).map(str::to_string))
-                        .unwrap_or_else(|| "the acceptance check".to_string()),
-                    worktree_path: worktree,
-                });
+            for r in rows {
+                out.push(r?);
             }
             Ok(out)
         })
         .await
 }
 
-async fn session_for(store: &Store, worktree_path: &str) -> Result<Option<String>> {
-    let path = worktree_path.to_string();
+fn tasks_in_run(store: &Store, run_id: &str) -> Result<Vec<FinishedTask>> {
+    let stream = wkbd_proto::run_stream_id(run_id);
+    let (events, _) = store.read_since(Some(&stream), 0, 10_000)?;
+
+    // The last plan wins. A run that was replanned executed the graph it ended with, and the
+    // rejected attempt describes work that never happened.
+    let mut planned: Vec<wkbd_proto::TaskSummary> = Vec::new();
+    let mut verdicts: Vec<(String, bool)> = Vec::new();
+    for event in &events {
+        if let EventPayload::Run { run } = &event.payload {
+            match run {
+                RunEvent::Planned { tasks, .. } => planned = tasks.clone(),
+                RunEvent::TaskVerified { task_id, passed, .. } => {
+                    verdicts.retain(|(id, _)| id != task_id);
+                    verdicts.push((task_id.clone(), *passed));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for (task_id, passed) in verdicts {
+        let Some(spec) = planned.iter().find(|t| t.id == task_id) else { continue };
+        out.push(FinishedTask {
+            run_id: run_id.to_string(),
+            task_id,
+            passed,
+            declared_paths: spec.declared_paths.clone(),
+            verify_cmd: if spec.verify_cmd.trim().is_empty() {
+                "the acceptance check".to_string()
+            } else {
+                spec.verify_cmd.clone()
+            },
+        });
+    }
+    Ok(out)
+}
+
+/// The worker session that did one task.
+///
+/// Matched on the worktree path a worker is opened in, which ends in the run and the task. The
+/// suffix rather than a stored id, because nothing records the pairing anywhere else — and it is
+/// anchored on the separator so that a task called `a` cannot match a session for `beta`.
+async fn session_for(store: &Store, run_id: &str, task_id: &str) -> Result<Option<String>> {
+    let suffix = format!("%/{run_id}/{task_id}");
     store
         .read(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT id FROM sessions WHERE project_root = ?1 ORDER BY created_ms DESC LIMIT 1",
+                "SELECT id FROM sessions
+                 WHERE project_root LIKE ?1 ORDER BY created_ms DESC LIMIT 1",
             )?;
-            let mut rows = stmt.query([&path])?;
+            let mut rows = stmt.query([&suffix])?;
             match rows.next()? {
                 Some(row) => Ok(Some(row.get::<_, String>(0)?)),
                 None => Ok(None),
@@ -166,13 +197,35 @@ fn steps_in_session(store: &Store, session_id: &str) -> Result<Vec<String>> {
 
     let mut steps: Vec<String> = Vec::new();
     for event in &events {
-        if let EventPayload::ToolCallStarted { title, kind, .. } = &event.payload {
-            let signature = step_signature(kind, title);
-            // Consecutive duplicates collapse. Reading four files and reading six is the same
-            // procedure, and keeping the count is how a signature stops matching itself.
-            if steps.last().map(|s| s.as_str()) != Some(signature.as_str()) {
-                steps.push(signature);
+        let signature = match &event.payload {
+            EventPayload::ToolCallStarted { title, kind, .. } => step_signature(kind, title),
+
+            // File access performed for the agent counts as a step, and leaving it out was the
+            // same blind spot the transcript had before these were rendered: an agent that edits
+            // through the protocol's file methods — the path this daemon encourages, because it
+            // is the only one that is bounded and logged — emits no tool calls at all, so its
+            // work would be invisible here and every one of its tasks would distil to nothing.
+            //
+            // Only the allowed ones. A refusal is something that did not happen, and a procedure
+            // is a description of what to do.
+            EventPayload::FileAccess { op, requested, allowed: true, .. } => {
+                let verb = match op {
+                    FileOp::Read => "read",
+                    FileOp::Write => "write",
+                };
+                match extension_in(requested) {
+                    Some(ext) => format!("{verb} *.{ext}"),
+                    None => verb.to_string(),
+                }
             }
+
+            _ => continue,
+        };
+
+        // Consecutive duplicates collapse. Reading four files and reading six is the same
+        // procedure, and keeping the count is how a signature stops matching itself.
+        if steps.last().map(|s| s.as_str()) != Some(signature.as_str()) {
+            steps.push(signature);
         }
     }
     Ok(steps)
