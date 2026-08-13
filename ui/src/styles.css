@@ -1,0 +1,3143 @@
+/*
+ * Component styles.
+ *
+ * The layout rule that matters most: the three bands of a turn — reasoning, execution,
+ * answer — must read as three different kinds of thing. That is done with vertical rhythm
+ * and contrast rather than with borders and boxes, because a transcript full of boxes is a
+ * grey wall regardless of how many boxes it has.
+ */
+
+.app {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------------ sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: var(--border-thin) solid var(--border-default);
+  background: var(--bg-muted);
+  min-width: 0;
+}
+
+.sidebar-brand {
+  padding: var(--space-12) var(--space-16);
+  font-weight: 600;
+  font-size: var(--chat-font-size-l);
+  border-bottom: var(--border-thin) solid var(--border-default);
+}
+
+.sidebar-sessions {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--space-8);
+}
+
+.sidebar-sessions button {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-8);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  cursor: pointer;
+  color: var(--fg-default);
+  font: inherit;
+}
+
+.sidebar-sessions button:hover {
+  background: var(--bg-subtle);
+}
+
+.sidebar-sessions button[data-active='true'] {
+  background: var(--bg-subtle);
+  box-shadow: inset 2px 0 0 var(--fg-accent);
+}
+
+.session-agent {
+  font-size: var(--chat-font-size-s);
+  font-weight: 600;
+}
+
+.session-title {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Truncated from the left, because the end of a path is the part that distinguishes it. Three
+     orchestrated workers rooted at .../worktrees/<run>/<task> all render as
+     "/home/me/.local/state/wkbd/worktre…" when the ellipsis is on the right, which is three
+     identical rows for three different pieces of work. */
+  direction: rtl;
+  text-align: left;
+}
+
+/* The path itself stays left-to-right. Without this the `rtl` above moves a leading slash to the
+   end, and a path that reads "home/me/wkbd/" is worse than one that is truncated. */
+.session-title > bdi {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  border-top: var(--border-thin) solid var(--border-default);
+}
+
+.sidebar-footer button {
+  padding: var(--space-6) var(--space-8);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+.sidebar-footer button[data-active='true'] {
+  background: var(--bg-subtle);
+  color: var(--fg-default);
+}
+
+.connection {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  padding: var(--space-4) var(--space-8);
+}
+
+.connection[data-connected='false'] {
+  color: var(--fg-attention);
+}
+
+/* --------------------------------------------------------------------- main */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Holds the scrolling record and nothing else, so the pill inside it can be placed against the
+   foot of what the reader can actually see. */
+.transcript-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.banner {
+  padding: var(--space-8) var(--space-16);
+  font-size: var(--chat-font-size-s);
+}
+
+.banner-degraded {
+  background: var(--bg-attention-muted);
+  color: var(--fg-attention);
+  border-bottom: var(--border-thin) solid var(--border-default);
+}
+
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-24) 0 var(--space-16);
+  /* Anchors growth to the bottom, so a chunk arriving does not shift what is under the cursor
+     while the browser catches up with the scroll assignment. */
+  overflow-anchor: auto;
+}
+
+/* Only present while the record is detached, which is the only time it means anything. A
+   permanent button here would be a permanent claim that you are missing something.
+
+   Floated rather than placed in the flow. In the flow it appears and disappears as the reader
+   scrolls, which moves everything below it by its own height — so the act of scrolling up
+   reflows the composer, and scrolling back down reflows it again. */
+.jump-latest {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-12);
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-default);
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+}
+
+.jump-latest:hover {
+  color: var(--fg-default);
+}
+
+.empty {
+  max-width: var(--conversation-max-width);
+  margin: 0 auto;
+  padding: var(--space-24) var(--space-16);
+  color: var(--fg-muted);
+}
+
+/* --------------------------------------------------------------------- turn */
+
+.turn {
+  max-width: var(--conversation-max-width);
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-16);
+}
+
+.turn + .turn {
+  border-top: var(--border-thin) solid var(--chat-checkpoint-separator);
+  margin-top: var(--space-8);
+  padding-top: var(--space-24);
+}
+
+/*
+ * The user's instruction is a quoted line, not a bubble. The left rule reads as "this is
+ * the input", and it costs no horizontal space, which the diffs below need.
+ */
+.turn-prompt {
+  margin: 0 0 var(--space-24);
+  padding: var(--space-6) var(--space-12);
+  border-left: 3px solid var(--fg-accent);
+  background: var(--chat-request-bubble-background);
+  border-radius: 0 var(--radius-medium) var(--radius-medium) 0;
+  color: var(--fg-default);
+  font-size: var(--chat-font-size-l);
+  white-space: pre-wrap;
+}
+
+/* Attached files ride with the message that attached them, tight under the quoted line, so
+   the pairing survives a screen full of tool calls between them and the answer. */
+.turn-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: calc(-1 * var(--space-20)) 0 var(--space-20);
+  padding: 0 0 0 var(--space-12);
+  list-style: none;
+}
+
+.turn-attachments li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.turn-attachments li::before {
+  content: '';
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  background: var(--fg-success);
+  align-self: center;
+}
+
+/* A link is the degraded case, and it should not look like the healthy one. */
+.turn-attachments li[data-sent-as='link']::before {
+  background: transparent;
+  border: 1px solid var(--fg-muted);
+}
+
+.turn-attachments .attachment-size {
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the turn took. Quiet: it is a thing you look for, not a thing that should interrupt
+   reading the answer. */
+.turn-cost {
+  margin-top: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.turn-body {
+  display: flex;
+  flex-direction: column;
+  /* The gap between bands is larger than the gap inside one, so the three parts read as
+     three things rather than as one list. */
+  gap: var(--stack-gap-condensed);
+}
+
+.turn-stop,
+.turn-note,
+.turn-running,
+.unknown-note {
+  max-width: var(--conversation-max-width);
+  margin: var(--space-12) auto 0;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+.turn-running {
+  color: var(--chat-thinking-shimmer);
+}
+
+.turn-error {
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  font-size: var(--chat-font-size-s);
+}
+
+/* ------------------------------------------------------------ thought block */
+
+.thought-block {
+  border-radius: var(--radius-medium);
+}
+
+.thought-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  width: 100%;
+  padding: var(--space-4) var(--space-6);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+  text-align: left;
+  border-radius: var(--radius-medium);
+}
+
+.thought-header:hover {
+  background: var(--bg-muted);
+}
+
+/* The disclosure arrow, drawn rather than set.
+   Every glyph tried for this sat wrong: the filled triangle read as a bullet, and the chevron
+   codepoint rendered below the baseline in the fallback font and looked like a comma. A border pair
+   rotated 45° is crisp at any size and does not depend on a font containing anything in particular. */
+.thought-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-subtle);
+}
+
+.thought-caret::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  /* Collapsed points right, expanded points down, and the rotation animates so the direction change
+     is legible as the same arrow moving rather than as two different marks. */
+  transform: rotate(-45deg);
+  transform-origin: center;
+  transition: transform 120ms ease-out;
+}
+
+.thought-block[data-expanded='true'] .thought-caret::before {
+  transform: rotate(45deg);
+}
+
+/* The timeline the expanded body hangs from.
+   The rule is on this wrapper rather than on the body so that the closing row sits on the line
+   instead of after it: a line that stops short of the marker ending it reads as truncated. */
+.thought-timeline {
+  position: relative;
+  margin: var(--space-8) 0 var(--space-16) var(--space-16);
+  padding-left: var(--space-16);
+  border-left: var(--border-thin) solid var(--border-default);
+}
+
+/* A node on the line. Drawn rather than set, so its position comes from the box model instead of
+   from a font's idea of where a bullet belongs — the glyph version landed where a superscript would
+   and read as a typo inside the sentence. */
+.thought-node {
+  position: absolute;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--fg-subtle);
+  top: 0.7em;
+}
+
+/* While the agent is still thinking. A slow pulse rather than a spinner: a spinner claims something
+   is loading and will finish shortly, and a thought is neither. */
+.thought-node[data-live='true'] {
+  background: var(--fg-accent);
+  animation: thought-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes thought-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.thought-closed {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-subtle);
+}
+
+.thought-closed .thought-node.done {
+  position: absolute;
+  left: -20px;
+  top: 0.45em;
+  background: var(--fg-success);
+}
+
+.thought-done {
+  color: var(--fg-success);
+}
+
+.thought-inferred {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+  border: var(--border-thin) solid var(--border-muted);
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-6);
+}
+
+/* Reasoning is the lowest contrast band: it is provenance, not the result.
+   Set in the prose serif, because it is running text and is read as sentences, but held a step down
+   in size and colour so that skipping it is easy and reading it is possible. */
+.thought-body {
+  padding: 0;
+  color: var(--fg-muted);
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-m);
+  line-height: var(--prose-line-height);
+  white-space: pre-wrap;
+  /*
+   * A cap plus internal scrolling rather than unbounded growth. An expanding block pushes
+   * everything below it down on every token, and that layout shift while reading is the
+   * complaint that made two other products change this behaviour.
+   */
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* The label while the agent is still thinking.
+   Not fainter than the finished one, which is what the shimmer colour alone produced: this is the
+   only thing currently happening on the screen, and making it the quietest text in the transcript
+   inverts the hierarchy. It gets the ordinary muted colour and a slow pulse, so it is legible and
+   still reads as unfinished. */
+.shimmer {
+  color: var(--fg-muted);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .thought-block[data-live='true'] .shimmer {
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---------------------------------------------------------------- tool card */
+
+.tool-card {
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  overflow: hidden;
+}
+
+.tool-card[data-status='failed'] {
+  border-color: var(--fg-danger);
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-6) var(--space-8);
+  border: none;
+  background: var(--bg-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  text-align: left;
+  color: var(--fg-default);
+}
+
+.tool-caret {
+  width: 10px;
+  color: var(--fg-subtle);
+}
+
+.tool-kind {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  background: var(--chat-slash-command-background);
+  border-radius: var(--radius-small);
+  padding: 0 var(--space-4);
+}
+
+.tool-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-status {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.tool-card[data-status='failed'] .tool-status {
+  color: var(--fg-danger);
+}
+
+.spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  border: var(--border-thin) solid var(--fg-subtle);
+  border-top-color: transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: spin 0.8s linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.diff-stat {
+  display: inline-flex;
+  gap: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+}
+
+.diff-stat .added,
+.diff-counts .added {
+  color: var(--chat-lines-added-foreground);
+}
+
+.diff-stat .removed,
+.diff-counts .removed {
+  color: var(--chat-lines-removed-foreground);
+}
+
+.tool-body {
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.tool-text {
+  margin: 0;
+  padding: var(--space-8);
+  background: var(--bg-inset);
+  border-radius: var(--radius-medium);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tool-empty {
+  color: var(--fg-subtle);
+  font-size: var(--chat-font-size-s);
+}
+
+.tool-locations {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--chat-edited-file-foreground);
+}
+
+/* --------------------------------------------------------------------- diff */
+
+.diff {
+  border: var(--border-thin) solid var(--chat-request-code-border);
+  border-radius: var(--radius-medium);
+  overflow: hidden;
+}
+
+.diff-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  background: var(--bg-muted);
+  border-bottom: var(--border-thin) solid var(--border-default);
+  font-size: var(--chat-font-size-xs);
+}
+
+.diff-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-badge {
+  color: var(--fg-success);
+  border: var(--border-thin) solid currentColor;
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-6);
+}
+
+.diff-counts {
+  display: inline-flex;
+  gap: var(--space-4);
+  font-family: var(--font-mono);
+}
+
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: var(--chat-line-height-normal);
+}
+
+.diff-row.add {
+  background: var(--inline-chat-diff-inserted);
+}
+
+.diff-row.del {
+  background: var(--inline-chat-diff-removed);
+}
+
+.diff-lineno {
+  width: 1%;
+  padding: 0 var(--space-6);
+  text-align: right;
+  color: var(--fg-subtle);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.diff-marker {
+  width: 1%;
+  padding: 0 var(--space-2);
+  color: var(--fg-muted);
+  user-select: none;
+}
+
+.diff-text {
+  padding: 0 var(--space-6);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-truncated {
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  background: var(--bg-muted);
+}
+
+/* ----------------------------------------------------------------- terminal */
+
+.terminal {
+  border-radius: var(--radius-medium);
+  overflow: hidden;
+  background: var(--terminal-background);
+}
+
+.terminal-body {
+  margin: 0;
+  padding: var(--space-8);
+  color: var(--terminal-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.terminal-loading,
+.terminal-error,
+.terminal-truncated {
+  padding: var(--space-6) var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  background: var(--bg-muted);
+}
+
+.terminal-error {
+  color: var(--fg-danger);
+}
+
+/* ------------------------------------------------------------------- answer */
+
+/*
+ * The answer is the highest-contrast text in the turn. Everything above it explains how it
+ * was reached; a reader looking for the result should land here first.
+ *
+ * Four things carry the separation at once, because reviewed against a real transcript size and
+ * colour alone were not enough to read as a different kind of content: a larger size, full
+ * foreground colour against muted reasoning text, a rule above, and noticeably more space.
+ */
+.answer {
+  color: var(--fg-default);
+  /* The one place the serif earns the most. Everything above the answer is provenance — rows,
+     paths, counts — and a reader skimming for the result should land on something that reads like a
+     paragraph rather than like another row. */
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-xl);
+  line-height: var(--prose-line-height);
+  white-space: pre-wrap;
+  padding: var(--space-20) 0 var(--space-8);
+  margin-top: var(--space-20);
+  border-top: var(--border-thin) solid var(--border-muted);
+}
+
+/* Inline code inside prose.
+   Coloured rather than boxed. A box around every identifier in a paragraph breaks the line into
+   fragments, while colour marks it as a different kind of word and leaves the sentence intact. The
+   faint ground is there to survive being quoted onto a lighter surface. */
+.answer code,
+.thought-body code,
+.prose code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--fg-code);
+  background: var(--bg-inset);
+  border-radius: var(--radius-small);
+  padding: 0.1em 0.32em;
+}
+
+/* A caret while the answer is still arriving, so "still writing" is visible without having to
+   notice that the text stopped growing. */
+.answer[data-live='true']::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--fg-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .answer[data-live='true']::after {
+    animation: blink 1s step-end infinite;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.echo {
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-s);
+}
+
+/* --------------------------------------------------------------- permission */
+
+.permission {
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-medium);
+  background: var(--bg-attention-muted);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.permission[data-answered='true'] {
+  border-color: var(--border-default);
+  background: var(--bg-muted);
+}
+
+.permission-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  font-size: var(--chat-font-size-s);
+  font-weight: 600;
+}
+
+.permission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.permission-button {
+  height: var(--control-small-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+}
+
+.permission-button[data-kind='allow_once'],
+.permission-button[data-kind='allow_always'] {
+  border-color: var(--fg-success);
+  color: var(--fg-success);
+}
+
+.permission-button[data-kind='reject_once'],
+.permission-button[data-kind='reject_always'],
+.permission-button[data-kind='cancel'] {
+  border-color: var(--border-default);
+  color: var(--fg-muted);
+}
+
+.permission-outcome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+.permission-auto {
+  font-size: var(--chat-font-size-xs);
+  border: var(--border-thin) solid var(--border-muted);
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-6);
+}
+
+/* ----------------------------------------------------------------- composer */
+
+.composer {
+  border-top: var(--border-thin) solid var(--border-default);
+  padding: var(--space-8) var(--space-16) var(--space-16);
+  background: var(--bg-default);
+}
+
+.composer > * {
+  max-width: var(--conversation-max-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/*
+ * Autonomy sits above the input, separated from the footer row. One is a standing policy,
+ * the other is right-now state; on one line they look like the same kind of setting.
+ */
+.autonomy-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: var(--space-6);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.autonomy-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.autonomy-label {
+  color: var(--fg-subtle);
+}
+
+.queue {
+  list-style: none;
+  margin: 0 auto var(--space-6);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) dashed var(--border-default);
+  border-radius: var(--radius-medium);
+  font-size: var(--chat-font-size-s);
+  background: var(--bg-muted);
+}
+
+.queue-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-when {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.queue-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-l);
+  line-height: 1;
+}
+
+.composer-box {
+  position: relative;
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+}
+
+/* The completion list sits above the box rather than below it. Below, it would cover the
+   footer controls and, on a short window, fall off the bottom of the screen — and the reading
+   path already runs upward from the box into the transcript. */
+.mention-picker {
+  position: absolute;
+  bottom: calc(100% + var(--space-4));
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-4);
+  list-style: none;
+  background: var(--bg-default);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 12%);
+}
+
+.mention-picker li button {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-4) var(--space-8);
+  border: none;
+  border-radius: var(--radius-small);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* Two different things, deliberately drawn differently.
+   The mouse being over a row and the keyboard being on it are not the same state, and Enter acts
+   on the second one. The first version used --bg-muted for both, which on the paper theme is
+   *lighter* than the picker's own background by five parts in 255 — so the row Enter would have
+   chosen was, in practice, unmarked. */
+.mention-picker li button:hover {
+  background: var(--bg-subtle);
+}
+
+.mention-picker li button[data-highlighted='true'] {
+  background: var(--bg-subtle);
+  box-shadow: inset 2px 0 0 var(--fg-accent);
+}
+
+.mention-name {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-default);
+}
+
+.mention-path {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-empty {
+  margin: 0;
+  padding: var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+/* What is about to be sent, above the box, next to the message it belongs to. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.attachments li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.attachments li button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--fg-muted);
+  padding: 0;
+  line-height: 1;
+}
+
+.attachment-path {
+  font-family: var(--font-mono);
+  color: var(--fg-default);
+}
+
+.attachment-how {
+  color: var(--fg-muted);
+}
+
+.composer-box:focus-within {
+  border-color: var(--focus-outline-color);
+}
+
+.composer-input {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  resize: vertical;
+  padding: var(--space-8);
+  font: inherit;
+  font-size: var(--chat-font-size-l);
+  color: var(--fg-default);
+  outline: none;
+}
+
+/*
+ * The footer lives inside the input's border, and every slot can be absent. On an agent
+ * that declares no options and reports no usage, three of these disappear and the rest must
+ * not move, so the spacer does the work rather than justify-content.
+ */
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8) var(--space-6);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  border-top: var(--border-thin) solid var(--border-muted);
+  flex-wrap: wrap;
+}
+
+.footer-spacer {
+  flex: 1;
+}
+
+.footer-agent {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+.config-select,
+.config-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.config-select-label {
+  color: var(--fg-subtle);
+}
+
+.config-select select,
+.autonomy-row select {
+  height: var(--control-small-size);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+  padding: 0 var(--space-4);
+}
+
+.config-restart-hint {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+  border: var(--border-thin) solid currentColor;
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-4);
+}
+
+.footer-overflow summary {
+  cursor: pointer;
+}
+
+.footer-overflow-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+}
+
+.context-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-variant-numeric: tabular-nums;
+  padding: 0 var(--space-6);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-full);
+  height: var(--control-small-size);
+}
+
+.context-track {
+  stroke: var(--border-default);
+}
+
+.context-fill {
+  stroke: var(--fg-accent);
+}
+
+.context-ring[data-level='warning'] .context-fill {
+  stroke: var(--fg-attention);
+}
+
+.context-ring[data-level='critical'] .context-fill {
+  stroke: var(--fg-danger);
+}
+
+.send-group {
+  display: inline-flex;
+  gap: var(--space-4);
+}
+
+.send-button {
+  height: var(--control-small-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.send-secondary {
+  height: var(--control-small-size);
+  padding: 0 var(--control-padding-inline-condensed);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+}
+
+/* -------------------------------------------------------------------- rules */
+
+.rules,
+.inspector {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-24);
+  max-width: var(--conversation-max-width);
+  margin: 0 auto;
+  width: 100%;
+}
+
+.rules h1,
+.inspector h1 {
+  font-size: var(--chat-font-size-xxl);
+  margin: 0 0 var(--space-8);
+}
+
+.rules-intro {
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-s);
+  margin: 0 0 var(--space-16);
+}
+
+.rules-compose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-24);
+}
+
+.rules-compose textarea {
+  width: 100%;
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  font: inherit;
+  resize: vertical;
+}
+
+.rules-compose-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  font-size: var(--chat-font-size-s);
+}
+
+.rules-compose-actions select {
+  height: var(--control-small-size);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  font: inherit;
+  margin-left: var(--space-6);
+}
+
+.rules-compose-actions button {
+  height: var(--control-medium-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+  font: inherit;
+}
+
+.rules-group h2 {
+  font-size: var(--chat-font-size-l);
+  margin: var(--space-16) 0 var(--space-8);
+  color: var(--fg-muted);
+}
+
+.rules-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+}
+
+.rule-body {
+  flex: 1;
+}
+
+.rule-applied {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-success);
+}
+
+.rule-delete {
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+  padding: var(--space-2) var(--space-8);
+}
+
+.rules-empty,
+.inspector-empty {
+  color: var(--fg-subtle);
+  font-size: var(--chat-font-size-s);
+}
+
+.rules-error,
+.inspector-error {
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  padding: var(--space-8);
+  border-radius: var(--radius-medium);
+  margin-bottom: var(--space-12);
+  font-size: var(--chat-font-size-s);
+}
+
+/* --------------------------------------------------------------------- runs */
+
+/*
+ * A run is a graph, not a conversation, so this screen is the one place the 950px measure is
+ * dropped: waves are laid out side by side and capping the width would force the concurrency
+ * into a scroll bar at three tasks.
+ */
+.runs {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-24);
+  width: 100%;
+}
+
+.runs h1 {
+  font-size: var(--chat-font-size-xxl);
+  margin: 0 0 var(--space-16);
+}
+
+.run-start {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-24);
+  max-width: var(--conversation-max-width);
+}
+
+.run-start-goal {
+  width: 100%;
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  font: inherit;
+  font-size: var(--chat-font-size-l);
+  resize: vertical;
+}
+
+.run-start-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  font-size: var(--chat-font-size-s);
+}
+
+.run-start-label {
+  color: var(--fg-subtle);
+  margin-right: var(--space-6);
+}
+
+.run-start-actions input {
+  height: var(--control-small-size);
+  padding: 0 var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  font: inherit;
+  font-family: var(--font-mono);
+  min-width: 280px;
+}
+
+.run-start-actions button {
+  height: var(--control-medium-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+  font: inherit;
+}
+
+.run-start-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: var(--conversation-max-width);
+}
+
+.run-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  text-align: left;
+  padding: var(--space-8) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  cursor: pointer;
+  font: inherit;
+  color: var(--fg-default);
+}
+
+.run-row:hover,
+.run-row[data-active='true'] {
+  background: var(--bg-muted);
+}
+
+.run-row-goal {
+  font-size: var(--chat-font-size-l);
+}
+
+.run-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-row-root {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The one thing that has to survive a glance down a list of runs: which of them wants a person. */
+.run-row-waiting {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+}
+
+.runs-empty {
+  color: var(--fg-subtle);
+  font-size: var(--chat-font-size-s);
+  max-width: var(--conversation-max-width);
+}
+
+/* ----------------------------------------------------------------- run view */
+
+.run-header {
+  margin-bottom: var(--space-24);
+}
+
+.run-back {
+  border: none;
+  background: transparent;
+  padding: 0 0 var(--space-6);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-accent);
+}
+
+.run-goal {
+  font-size: var(--chat-font-size-xxl);
+  margin: 0 0 var(--space-6);
+  max-width: var(--conversation-max-width);
+}
+
+.run-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-root {
+  font-family: var(--font-mono);
+}
+
+.run-status {
+  border: var(--border-thin) solid currentColor;
+  border-radius: var(--radius-full);
+  padding: 0 var(--space-8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.run-status[data-status='running'],
+.run-status[data-status='planning'] {
+  color: var(--fg-accent);
+}
+
+.run-status[data-status='awaiting_merge'] {
+  color: var(--fg-attention);
+}
+
+.run-status[data-status='done'] {
+  color: var(--fg-success);
+}
+
+.run-status[data-status='failed'] {
+  color: var(--fg-danger);
+}
+
+.run-action {
+  height: var(--control-small-size);
+  padding: 0 var(--control-padding-inline-condensed);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+}
+
+.run-detail,
+.run-blocker {
+  margin: var(--space-8) 0 0;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+  max-width: var(--conversation-max-width);
+}
+
+/* A run that wants a decision is not in the same category as one that is merely stuck, and the
+   colour is the only thing separating them at a glance. */
+.run-blocker[data-kind='awaiting_merge'] {
+  color: var(--fg-attention);
+}
+
+.run-blocker[data-kind='failed'],
+.run-blocker[data-kind='merge_rejected'] {
+  color: var(--fg-danger);
+}
+
+.run-error {
+  margin: var(--space-8) 0 0;
+  padding: var(--space-8);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  font-size: var(--chat-font-size-s);
+  max-width: var(--conversation-max-width);
+}
+
+.run-empty {
+  color: var(--fg-subtle);
+  font-size: var(--chat-font-size-s);
+  max-width: var(--conversation-max-width);
+}
+
+.run-section {
+  margin: var(--space-24) 0;
+  max-width: var(--conversation-max-width);
+}
+
+.run-section h2,
+.merge-gate h2 {
+  font-size: var(--chat-font-size-l);
+  margin: 0 0 var(--space-8);
+}
+
+/* ------------------------------------------------------------- task graph */
+
+/*
+ * One column per wave, tasks stacked inside it. Position carries the whole graph: a column is
+ * a set of tasks that run at once, and columns run left to right in dependency order. Scrolling
+ * horizontally is the accepted cost — collapsing waves into one column would lose the only
+ * property the layout exists to show.
+ */
+.run-waves {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(280px, 1fr);
+  gap: var(--stack-gap-normal);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--space-8);
+}
+
+.run-wave {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-gap-condensed);
+  min-width: 0;
+}
+
+/* The rule between columns is the boundary between "at the same time" and "after". Without it
+   two adjacent columns read as one wide list. */
+.run-wave + .run-wave {
+  border-left: var(--border-thin) solid var(--border-default);
+  padding-left: var(--stack-gap-normal);
+}
+
+.wave-title {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--chat-font-size-s);
+  margin: 0;
+}
+
+.wave-note {
+  font-size: var(--chat-font-size-xs);
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+.task-card {
+  border: var(--border-thin) solid var(--border-default);
+  border-left: 3px solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* Status is on the left edge as well as in the pill: down a column of cards the edge is what is
+   actually scannable, and the pill is what is unambiguous. */
+.task-card[data-status='completed'] {
+  border-left-color: var(--fg-success);
+}
+
+.task-card[data-status='failed'] {
+  border-left-color: var(--fg-danger);
+  background: var(--bg-danger-muted);
+}
+
+.task-card[data-status='blocked'] {
+  border-left-color: var(--fg-attention);
+  background: var(--bg-attention-muted);
+}
+
+.task-card[data-status='dispatched'],
+.task-card[data-status='verifying'] {
+  border-left-color: var(--fg-accent);
+}
+
+.task-card[data-status='pending'] {
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+
+.task-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.task-title {
+  font-weight: 600;
+  font-size: var(--chat-font-size-m);
+}
+
+.task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--chat-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.task-status[data-status='completed'] {
+  color: var(--fg-success);
+}
+
+.task-status[data-status='failed'] {
+  color: var(--fg-danger);
+}
+
+.task-status[data-status='blocked'] {
+  color: var(--fg-attention);
+}
+
+.task-status[data-status='dispatched'],
+.task-status[data-status='verifying'] {
+  color: var(--fg-accent);
+}
+
+.task-detail {
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.task-routed-by {
+  margin-left: var(--space-8);
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.task-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-8);
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+}
+
+.task-facts dt {
+  color: var(--fg-subtle);
+}
+
+.task-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.path-list,
+.assertion-list,
+.id-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-none {
+  color: var(--fg-subtle);
+}
+
+.task-cmd {
+  overflow-wrap: anywhere;
+}
+
+.task-workspace {
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.task-missing {
+  margin: 0;
+  padding: var(--space-8);
+  border: var(--border-thin) dashed var(--border-default);
+  border-radius: var(--radius-medium);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+/* --------------------------------------------------------------- verdicts */
+
+.task-verdict {
+  margin: 0;
+  font-size: var(--chat-font-size-xs);
+}
+
+.task-verdict[data-passed='true'] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--fg-success);
+}
+
+.verdict-head {
+  margin: 0 0 var(--space-4);
+  color: var(--fg-danger);
+  font-weight: 600;
+}
+
+.verdict-group h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--chat-font-size-xs);
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+
+/* A regression is work that was already correct being broken, so it is the one that gets the
+   full danger treatment; an assertion that never started passing is an unfinished task. */
+.verdict-group[data-severity='regressed'] .assertion-list {
+  color: var(--fg-danger);
+}
+
+.verdict-group[data-severity='missing-pass'] .assertion-list {
+  color: var(--fg-attention);
+}
+
+.verdict-detail {
+  margin: var(--space-4) 0 0;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------- replans and rejections */
+
+.problem-list,
+.replan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font-size: var(--chat-font-size-s);
+}
+
+.plan-rejection {
+  padding: var(--space-8);
+  border-left: 3px solid var(--fg-attention);
+  background: var(--bg-attention-muted);
+  border-radius: 0 var(--radius-medium) var(--radius-medium) 0;
+  margin-bottom: var(--space-8);
+}
+
+.plan-attempt,
+.replan-attempt {
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.replan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+}
+
+.replan-trigger {
+  font-weight: 600;
+}
+
+.replan-task {
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.merge-rejection {
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--fg-danger);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  margin-bottom: var(--space-8);
+  font-size: var(--chat-font-size-s);
+}
+
+.rejection-dropped {
+  margin: 0;
+  font-weight: 600;
+  color: var(--fg-danger);
+}
+
+.rejection-detail {
+  margin: var(--space-4) 0;
+  color: var(--fg-default);
+  overflow-wrap: anywhere;
+}
+
+.rejection-kept {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.rejection-kept .id-list,
+.merge-order .id-list,
+.merge-excluded .id-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+/* -------------------------------------------------------------- merge gate */
+
+/*
+ * The gate is attention-coloured rather than success-coloured even though everything in it
+ * passed. Green here would read as "done", and the entire point of this section is that it is
+ * not done until somebody decides it is.
+ */
+.merge-gate {
+  margin: var(--space-24) 0;
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-medium);
+  background: var(--bg-attention-muted);
+  max-width: var(--conversation-max-width);
+}
+
+.merge-why {
+  margin: 0 0 var(--space-12);
+  font-size: var(--chat-font-size-s);
+}
+
+.merge-candidate {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-s);
+}
+
+.merge-order,
+.merge-excluded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+  font-size: var(--chat-font-size-xs);
+}
+
+.merge-order-label,
+.merge-excluded-label,
+.rejection-kept-label {
+  color: var(--fg-muted);
+}
+
+.merge-actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-top: var(--space-12);
+}
+
+.merge-button {
+  height: var(--control-medium-size);
+  padding: 0 var(--control-padding-inline-normal);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+}
+
+.merge-button:disabled,
+.run-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- inspector */
+
+.inspector-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-12);
+}
+
+.inspector-header input[type='search'] {
+  height: var(--control-small-size);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  padding: 0 var(--space-8);
+  font: inherit;
+}
+
+.inspector-frames {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.frame {
+  display: grid;
+  grid-template-columns: 16px 100px 90px auto;
+  gap: var(--space-6);
+  align-items: start;
+  padding: var(--space-4);
+  border-radius: var(--radius-small);
+  font-size: var(--chat-font-size-xs);
+}
+
+.frame[data-direction='to_agent'] {
+  background: var(--bg-muted);
+}
+
+.frame[data-malformed='true'] {
+  background: var(--bg-danger-muted);
+}
+
+.frame-agent,
+.frame-time {
+  color: var(--fg-muted);
+}
+
+/* Direction is the first thing you look for in a protocol log, so it gets a filled badge rather
+   than a bare glyph, which at this size was easy to miss entirely. */
+.frame-dir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-small);
+  /* The glyph needs its own size: inheriting the log's 11px made the arrow unreadable inside
+     the badge, which defeats the point of having a direction indicator at all. */
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--fg-on-emphasis);
+  background: var(--fg-muted);
+}
+
+.frame[data-direction='to_agent'] .frame-dir {
+  background: var(--bg-accent-emphasis);
+}
+
+.frame[data-direction='from_agent'] .frame-dir {
+  background: var(--fg-success);
+}
+
+.frame-bad {
+  color: var(--fg-danger);
+}
+
+/* Both span the grid, like the line they belong to. Without that they landed in the 16px column
+   the direction arrow lives in, which wrapped the button one word per line and stacked it on top
+   of the note beside it. */
+.frame-more {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: var(--space-4);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-accent);
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-xs);
+  cursor: pointer;
+}
+
+.frame-clipped {
+  grid-column: 1 / -1;
+  margin: var(--space-2) 0 0;
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-xs);
+  font-style: italic;
+}
+
+.frame-line {
+  grid-column: 1 / -1;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--font-mono);
+}
+
+/* A file read or written for the agent.
+   A row, not a card: a turn can contain many reads, and giving each of them the weight of a tool
+   call buries the two that changed something. A refusal breaks out of that quietness on purpose —
+   it is the line that says the agent tried to leave its workspace. */
+.file-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+.file-op {
+  flex: 0 0 auto;
+  font-size: var(--chat-font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-subtle);
+}
+
+.file-path {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-default);
+  overflow-wrap: anywhere;
+}
+
+.file-bytes {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.file-row.refused {
+  color: var(--fg-attention);
+  background: var(--bg-attention-muted);
+  border-left: 2px solid var(--fg-attention);
+  border-radius: var(--radius-small);
+  padding: var(--space-8);
+  margin: var(--space-4) 0;
+}
+
+.file-row.refused .file-op,
+.file-row.refused .file-path {
+  color: var(--fg-attention);
+  font-weight: 600;
+}
+
+.file-row.refused .file-reason {
+  margin-left: auto;
+  font-size: var(--chat-font-size-xs);
+}
+
+/* ── The sidebar ─────────────────────────────────────────────────────────────────────────────
+   Sessions grouped by project, with a filter and a way to open a new one. The flat list this
+   replaced left the middle of the sidebar empty and repeated the project path under every row, and
+   for orchestrated workers — all rooted under one run's worktree directory — it produced a column of
+   rows that were textually identical. */
+
+.sidebar-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 var(--space-8) var(--space-8);
+}
+
+.sidebar-actions {
+  padding: var(--space-8) 0;
+}
+
+.sidebar-new {
+  width: 100%;
+  padding: var(--space-6) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  color: var(--fg-default);
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-new:hover {
+  border-color: var(--fg-accent);
+  color: var(--fg-accent);
+}
+
+.sidebar-filter {
+  width: 100%;
+  margin-bottom: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+}
+
+.new-session {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+  padding: var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+}
+
+.new-session select,
+.new-session input {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-6);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-small);
+  background: var(--bg-default);
+  color: var(--fg-default);
+}
+
+.new-session-actions {
+  display: flex;
+  gap: var(--space-6);
+}
+
+.new-session-actions button {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-small);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+}
+
+.new-session-actions button.quiet {
+  background: transparent;
+  color: var(--fg-muted);
+}
+
+.new-session-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sidebar-group {
+  margin-bottom: var(--space-12);
+}
+
+/* The project stated once for the group rather than under every row. Truncated from the left,
+   because the end of a path is the part that tells two of them apart. */
+.sidebar-group-name {
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-4);
+  font-size: var(--chat-font-size-xs);
+  font-weight: 400;
+  color: var(--fg-subtle);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.sidebar-group-name > bdi {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+.sidebar-empty {
+  margin: 0 var(--space-4) var(--space-8);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+  line-height: var(--chat-line-height-normal);
+}
+
+/* ── The transcript before there is one ──────────────────────────────────────────────────────
+   Set wide and in the prose serif, because it is the one screen that is entirely reading. */
+
+.start-here {
+  /* Wider than a reading measure on purpose: the paragraph is short and the cards below want to sit
+     side by side, and a column narrow enough for comfortable prose forces them to stack. */
+  max-width: 780px;
+  margin: var(--space-40) auto;
+  padding: 0 var(--space-16);
+  font-family: var(--font-serif);
+}
+
+.start-here h1 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-xxl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.start-here > p {
+  max-width: 62ch;
+  margin: 0 0 var(--space-32);
+  font-size: var(--chat-font-size-l);
+  line-height: var(--prose-line-height);
+  color: var(--fg-muted);
+}
+
+.start-here-cards {
+  display: grid;
+  gap: var(--space-16);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.start-here-cards article {
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-large);
+  background: var(--bg-muted);
+}
+
+.start-here-cards h2 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-m);
+  font-weight: 600;
+}
+
+.start-here-cards p {
+  margin: 0;
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-muted);
+}
+
+.start-here-cards button {
+  margin-top: var(--space-12);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-accent);
+  cursor: pointer;
+}
+
+/* A request nobody answered before the turn ended.
+   Drained of the attention colour: an unanswered question is over, and keeping it loud puts a
+   standing alarm in the transcript for something that can no longer be acted on. */
+.permission[data-expired='true'] {
+  background: var(--bg-muted);
+  border-color: var(--border-muted);
+  color: var(--fg-subtle);
+}
+
+.permission[data-expired='true'] .permission-title,
+.permission[data-expired='true'] .permission-icon {
+  color: var(--fg-subtle);
+}
+
+/* A task id, which is an identifier rather than a name. */
+.session-agent.mono {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+}
+
+/* The way from a task to what its worker actually did.
+   A quiet link rather than a button: the card's decisions are the merge gate's, and this is
+   navigation. */
+.task-transcript {
+  margin-top: var(--space-8);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The input on the start screen.
+   The first thing on the page, because saying what you want is the first thing anybody wants to do
+   here — and it opens the session itself, so nothing has to be arranged before typing. */
+.start-composer {
+  margin: 0 0 var(--space-32);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-large);
+  background: var(--bg-muted);
+  overflow: hidden;
+}
+
+.start-composer textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-16);
+  border: none;
+  background: transparent;
+  resize: vertical;
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-l);
+  line-height: var(--prose-line-height);
+  color: var(--fg-default);
+}
+
+.start-composer textarea:focus {
+  outline: none;
+}
+
+.start-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border-top: var(--border-thin) solid var(--border-muted);
+  font-family: var(--font-sans);
+}
+
+.start-composer-foot select,
+.start-composer-foot input {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+}
+
+/* The directory takes the room, because a path is the long value on this row. */
+.start-composer-foot input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+}
+
+.start-composer-foot button {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-16);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+}
+
+.start-composer-foot button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.start-here-blocked {
+  margin: 0 0 var(--space-32);
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}
+
+/* ── The approval queue ──────────────────────────────────────────────────────────────────────
+   Set like the rest of the reading surfaces, because deciding whether to let the system change its
+   own instructions is a reading task before it is a clicking one. */
+
+.proposals {
+  max-width: 780px;
+  margin: var(--space-32) auto;
+  padding: 0 var(--space-16);
+  font-family: var(--font-serif);
+}
+
+.proposals h1 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-xxl);
+  font-weight: 600;
+}
+
+.proposals-lede {
+  margin: 0 0 var(--space-24);
+  font-size: var(--chat-font-size-m);
+  line-height: var(--prose-line-height);
+  color: var(--fg-muted);
+}
+
+.proposals-empty {
+  margin: 0;
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-subtle);
+}
+
+.proposals-error {
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  font-size: var(--chat-font-size-s);
+}
+
+.proposal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.proposal-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  margin-top: var(--space-8);
+  padding: var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-default);
+  cursor: pointer;
+  text-align: left;
+}
+
+.proposal-row[data-open='true'] {
+  border-color: var(--fg-accent);
+}
+
+.proposal-kind {
+  font-weight: 600;
+}
+
+.proposal-scope {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.proposal-scope > bdi {
+  direction: ltr;
+  unicode-bidi: bidi-override;
+}
+
+/* Raised risk is stated on the row, because the reviewer decides which one to open from here. */
+.proposal-risk {
+  flex: 0 0 auto;
+  padding: 0 var(--space-8);
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-full);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+}
+
+.proposal-detail {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--border-default);
+  border-top: none;
+  border-radius: 0 0 var(--radius-medium) var(--radius-medium);
+  background: var(--bg-default);
+}
+
+.proposal-detail h2 {
+  margin: var(--space-16) 0 var(--space-8);
+  font-size: var(--chat-font-size-m);
+  font-weight: 600;
+}
+
+.proposal-detail h2:first-child {
+  margin-top: 0;
+}
+
+.proposal-body {
+  margin: 0;
+  padding: var(--space-12);
+  border-radius: var(--radius-medium);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  line-height: var(--chat-line-height-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What was taken out. Attention-coloured because it is the part a reviewer would otherwise never
+   know to look for. */
+.proposal-hidden {
+  margin-top: var(--space-12);
+  padding: var(--space-12);
+  border-left: var(--border-thick) solid var(--fg-attention);
+  border-radius: var(--radius-small);
+  background: var(--bg-attention-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.proposal-hidden h3 {
+  margin: 0 0 var(--space-4);
+  font-size: var(--chat-font-size-xs);
+  font-weight: 600;
+}
+
+.proposal-hidden ul,
+.proposal-evidence ul {
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-16);
+}
+
+.proposal-evidence {
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-muted);
+}
+
+.proposal-times {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.proposal-runs {
+  margin: var(--space-8) 0 0;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.proposal-confirm {
+  margin-top: var(--space-16);
+  padding: var(--space-12);
+  border: var(--border-thin) solid var(--fg-attention);
+  border-radius: var(--radius-medium);
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+}
+
+.proposal-confirm input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-small);
+  background: var(--bg-default);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-default);
+}
+
+.proposal-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+  font-family: var(--font-sans);
+}
+
+/* Both actions carry the same weight, which is a departure from the usual primary-button
+   treatment and the reason for it is this screen's whole purpose.
+   A filled accent button is the one a reader clicks without reading, and what waits here is the
+   system asking to change its own future instructions — the target an injection is aiming for.
+   Approving is not the expected outcome to be made fast; it is a decision to be made. So the two
+   are the same size and the same weight, and only their colour says which is which. */
+.proposal-actions button {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-16);
+  border: var(--border-thin) solid var(--fg-accent);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-accent);
+  cursor: pointer;
+}
+
+.proposal-actions button:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+.proposal-actions button.quiet {
+  border: var(--border-thin) solid var(--border-default);
+  background: var(--bg-default);
+  color: var(--fg-muted);
+}
+
+.proposal-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.proposal-hash {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+/* What the proposal asks for, in sentences. The primary reading, with the stored bytes underneath
+   it rather than instead of it. */
+.proposal-changes {
+  margin: 0;
+  padding-left: var(--space-20);
+  font-size: var(--chat-font-size-m);
+  line-height: var(--prose-line-height);
+}
+
+.proposal-raw {
+  margin-top: var(--space-12);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.proposal-raw summary {
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.proposal-raw .proposal-body {
+  margin-top: var(--space-8);
+}
+
+/* ── The review surface ──────────────────────────────────────────────────────────────────────
+   The full-width read of a change. The inline diffs in a transcript pointed here for the rest of a
+   truncated change and there was nothing at the other end, which is worse than the truncation it
+   apologised for. */
+
+.review {
+  max-width: 1100px;
+  margin: var(--space-24) auto;
+  padding: 0 var(--space-16);
+}
+
+.review-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
+.review-head h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-xl);
+  font-weight: 600;
+}
+
+.review-subtitle {
+  margin: var(--space-4) 0 0;
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+  line-height: var(--chat-line-height-relaxed);
+}
+
+.review-close {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+/* The paths first and complete. Rendering every diff immediately makes the shape of a twelve-file
+   change something you discover by scrolling, and the first question about a change is which files it
+   touched. */
+.review-files {
+  list-style: none;
+  margin: 0 0 var(--space-16);
+  padding: 0;
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  overflow: hidden;
+}
+
+.review-files button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  width: 100%;
+  padding: var(--space-6) var(--space-12);
+  border: none;
+  border-top: var(--border-thin) solid var(--border-muted);
+  background: var(--bg-muted);
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-default);
+  cursor: pointer;
+  text-align: left;
+}
+
+.review-files li:first-child button {
+  border-top: none;
+}
+
+.review-files button[data-open='true'] {
+  background: var(--bg-default);
+  font-weight: 600;
+}
+
+.review-files code {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.review-tag {
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-6);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}
+
+.review-tag[data-kind='added'] {
+  color: var(--fg-success);
+}
+
+.review-tag[data-kind='deleted'] {
+  color: var(--fg-danger);
+}
+
+.review-tag[data-kind='omitted'] {
+  color: var(--fg-attention);
+}
+
+/* Said out loud rather than left to be noticed. A surface showing the first two hundred files of a
+   larger change is showing a different change from the one being merged. */
+.review-truncated,
+.review-omitted {
+  margin: 0 0 var(--space-16);
+  padding: var(--space-8) var(--space-12);
+  border-left: var(--border-thick) solid var(--fg-attention);
+  border-radius: var(--radius-small);
+  background: var(--bg-attention-muted);
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+}
+
+.review-empty {
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-m);
+  color: var(--fg-muted);
+}
+
+.review-error {
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-medium);
+  background: var(--bg-danger-muted);
+  color: var(--fg-danger);
+  font-size: var(--chat-font-size-s);
+}
+
+.task-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-16);
+}
+
+/* Before the merge buttons, deliberately: the gate's argument is that acceptance is not the same as
+   the change being wanted, and the only way to decide the second is to read it. */
+.merge-review {
+  display: block;
+  margin: var(--space-12) 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ── The agent's plan ────────────────────────────────────────────────────────────────────────
+   Above the transcript because it is current state rather than something that happened: the protocol
+   replaces it wholesale on every update, and a mutating block inside a scrolling record appears to say
+   different things at different scroll positions. */
+
+.plans {
+  flex: 0 0 auto;
+  padding: 0 var(--space-16) var(--space-8);
+  max-width: var(--conversation-max-width);
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
+}
+
+.plan {
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  margin-bottom: var(--space-8);
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-6) var(--space-12);
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+/* The same drawn arrow as the reasoning band, for the same reason: every glyph tried for it sat wrong
+   in at least one font. */
+.plan-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-subtle);
+}
+
+.plan-caret::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease-out;
+}
+
+.plan[data-expanded='true'] .plan-caret::before {
+  transform: rotate(45deg);
+}
+
+.plan-label {
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+/* The headline. It has to be legible with the entries closed, because it is the number somebody
+   glances at between messages. */
+.plan-count {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-default);
+}
+
+.plan-running {
+  margin-left: auto;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-full);
+  background: var(--bg-progress-muted);
+  color: var(--fg-progress);
+  font-size: var(--chat-font-size-xs);
+}
+
+/* The same slot, deliberately quieter. "Stopped here" is a fact about a turn that is over, so it
+   should not draw the eye the way something currently happening does. */
+.plan-stopped {
+  margin-left: auto;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-full);
+  border: var(--border-thin) solid var(--border-default);
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+}
+
+.plan-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-12) var(--space-8) var(--space-12);
+}
+
+.plan-entries li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-2) 0;
+  font-size: var(--chat-font-size-s);
+  line-height: var(--chat-line-height-relaxed);
+  color: var(--fg-muted);
+}
+
+.plan-mark {
+  flex: 0 0 auto;
+  width: 12px;
+  text-align: center;
+  color: var(--fg-subtle);
+}
+
+/* The three distinctions a plan exists to make. Done recedes, running is the only coloured row, and
+   what has not started is the default — so the eye lands on the one thing happening now. */
+.plan-entries li[data-status='completed'] {
+  color: var(--fg-subtle);
+  text-decoration: line-through;
+  text-decoration-color: var(--border-default);
+}
+
+.plan-entries li[data-status='completed'] .plan-mark {
+  color: var(--fg-success);
+}
+
+.plan-entries li[data-status='in_progress'] {
+  color: var(--fg-default);
+  font-weight: 600;
+}
+
+.plan-entries li[data-status='in_progress'] .plan-mark {
+  color: var(--fg-progress);
+}
+
+.plan-entries li[data-status='cancelled'] {
+  color: var(--fg-disabled);
+  text-decoration: line-through;
+}
+
+/* A status this build does not recognise, shown as itself. Drawing it as "pending" would state
+   something the agent did not say. */
+.plan-unknown {
+  margin-left: auto;
+  padding: 0 var(--space-6);
+  border: var(--border-thin) solid var(--border-muted);
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-attention);
+}
+
+/* ── Settings ────────────────────────────────────────────────────────────────────────────────
+   Small, and honest about being small: it offers what the daemon can actually change. */
+
+.settings {
+  max-width: 780px;
+  margin: var(--space-32) auto;
+  padding: 0 var(--space-16);
+  font-family: var(--font-serif);
+}
+
+.settings h1 {
+  margin: 0 0 var(--space-24);
+  font-size: var(--chat-font-size-xxl);
+  font-weight: 600;
+}
+
+.settings-group {
+  margin-bottom: var(--space-32);
+}
+
+.settings-group h2 {
+  margin: 0 0 var(--space-8);
+  font-size: var(--chat-font-size-l);
+  font-weight: 600;
+}
+
+.settings-note,
+.settings-empty {
+  margin: 0 0 var(--space-16);
+  font-size: var(--chat-font-size-s);
+  line-height: var(--prose-line-height);
+  color: var(--fg-muted);
+}
+
+.theme-list,
+.settings-agents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+}
+
+.theme-list button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'name swatches' 'note swatches';
+  gap: var(--space-2) var(--space-16);
+  align-items: center;
+  width: 100%;
+  margin-bottom: var(--space-8);
+  padding: var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.theme-list button[data-active='true'] {
+  border-color: var(--fg-accent);
+  background: var(--bg-default);
+}
+
+.theme-name {
+  grid-area: name;
+  font-size: var(--chat-font-size-s);
+  font-weight: 600;
+  color: var(--fg-default);
+}
+
+.theme-note {
+  grid-area: note;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-muted);
+}
+
+.theme-swatches {
+  grid-area: swatches;
+  display: flex;
+  gap: var(--space-4);
+}
+
+.theme-swatches i {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-small);
+  border: var(--border-thin) solid var(--border-muted);
+}
+
+/* Each preview renders that theme's own variables, so a theme that changes cannot leave a stale
+   swatch behind. The blocks below are the only place a theme is named outside tokens.css. */
+[data-theme-preview='paper'] i[data-swatch='bg'] { background: #f5f3ee; }
+[data-theme-preview='paper'] i[data-swatch='fg'] { background: #2b2926; }
+[data-theme-preview='paper'] i[data-swatch='accent'] { background: #b8542f; }
+[data-theme-preview='paper'] i[data-swatch='success'] { background: #3f6d41; }
+[data-theme-preview='paper'] i[data-swatch='danger'] { background: #a8342b; }
+
+[data-theme-preview='primer'] i[data-swatch='bg'] { background: #ffffff; }
+[data-theme-preview='primer'] i[data-swatch='fg'] { background: #1f2328; }
+[data-theme-preview='primer'] i[data-swatch='accent'] { background: #0969da; }
+[data-theme-preview='primer'] i[data-swatch='success'] { background: #1a7f37; }
+[data-theme-preview='primer'] i[data-swatch='danger'] { background: #d1242f; }
+
+[data-theme-preview='dark'] i[data-swatch='bg'] { background: #0d1117; }
+[data-theme-preview='dark'] i[data-swatch='fg'] { background: #f0f6fc; }
+[data-theme-preview='dark'] i[data-swatch='accent'] { background: #4493f8; }
+[data-theme-preview='dark'] i[data-swatch='success'] { background: #3fb950; }
+[data-theme-preview='dark'] i[data-swatch='danger'] { background: #f85149; }
+
+.settings-agents li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-12);
+  padding: var(--space-6) 0;
+  border-top: var(--border-thin) solid var(--border-muted);
+  font-size: var(--chat-font-size-s);
+}
+
+.settings-agents li:first-child {
+  border-top: none;
+}
+
+.settings-agents code {
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-code);
+}
+
+.settings-live {
+  margin-left: auto;
+  font-size: var(--chat-font-size-xs);
+  color: var(--fg-subtle);
+}

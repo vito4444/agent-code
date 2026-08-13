@@ -1,0 +1,24 @@
+[package]
+name = "wkbd-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+wkbd-proto.workspace = true
+# Owns process-lifetime policy. The pool spawns the processes, so it is the pool's job to make
+# sure they can always be cleaned up.
+wkbd-sec.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+agent-client-protocol.workspace = true
+tempfile.workspace = true

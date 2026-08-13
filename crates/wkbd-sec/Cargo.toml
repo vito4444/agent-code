@@ -1,0 +1,19 @@
+[package]
+name = "wkbd-sec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.180"
+
+[dev-dependencies]
+tempfile.workspace = true

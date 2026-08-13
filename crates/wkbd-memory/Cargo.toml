@@ -1,0 +1,22 @@
+[package]
+name = "wkbd-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+wkbd-proto.workspace = true
+wkbd-store.workspace = true
+wkbd-agent.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+wkbd-evolve = { version = "0.1.0", path = "../wkbd-evolve" }
+
+[dev-dependencies]
+tempfile.workspace = true

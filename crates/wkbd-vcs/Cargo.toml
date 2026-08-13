@@ -1,0 +1,28 @@
+[package]
+name = "wkbd-vcs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# For the dangerous-git-config list only. Two copies of that list would drift, and this
+# side would end up the weaker one.
+wkbd-sec.workspace = true
+# Glob matching is load-bearing for three separate decisions (which files an agent was
+# allowed to touch, which files get carried into a fresh worktree, which files the
+# acceptance harness must be able to restore). A hand-rolled matcher that gets `**`
+# subtly wrong would be wrong in all three at once, so this uses the same engine
+# ripgrep ships. `literal_separator(true)` is set at every call site; see `pathset`.
+globset = "0.4"
+hex.workspace = true
+serde = { workspace = true }
+sha2.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# Every test in this crate drives a real `git` binary against a real repository.
+# Mocking git would only test our model of git, and the two behaviours this crate is
+# built around (exit-code-vs-output disagreement in merge-tree, conflicts between
+# disjoint path sets) are exactly the ones a mock would get wrong.
+tempfile.workspace = true

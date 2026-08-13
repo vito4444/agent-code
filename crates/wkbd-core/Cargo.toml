@@ -1,0 +1,40 @@
+[package]
+name = "wkbd-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wkbd-core"
+path = "src/main.rs"
+
+[dependencies]
+wkbd-proto.workspace = true
+wkbd-store.workspace = true
+wkbd-agent.workspace = true
+wkbd-sec.workspace = true
+wkbd-vcs.workspace = true
+wkbd-memory.workspace = true
+wkbd-orch.workspace = true
+wkbd-evolve.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+rusqlite.workspace = true
+axum.workspace = true
+clap.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+ignore = "0.4.33"
+base64 = "0.23.1"
+
+[dev-dependencies]
+tempfile.workspace = true
+# Only for the conformance test: the blocks we build for attachments are hand-rolled JSON, and
+# deserializing them into the official types is what stops them drifting out of spec silently.
+agent-client-protocol.workspace = true

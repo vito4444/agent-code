@@ -1,0 +1,250 @@
+/**
+ * HTTP calls to the daemon.
+ *
+ * The base URL is relative, because the daemon serves the interface itself. That is what
+ * makes a browser a first-class client rather than a fallback: the same build runs inside
+ * the desktop shell and in Chrome, and on Linux — where the embedded webview is the least
+ * predictable part of the stack — a browser is a working escape route rather than a rewrite.
+ */
+
+import type { Rule } from '../components/rules/RulesScreen';
+import type {
+  AgentSummary,
+  ChangeSet,
+  PathEntry,
+  ProposalReview,
+  ProposalSummary,
+  RunSummary,
+  SessionSummary,
+} from './types';
+
+export type {
+  AgentSummary,
+  ChangeSet,
+  PathEntry,
+  ProposalReview,
+  ProposalSummary,
+  SessionSummary,
+};
+
+const base = '/api';
+
+async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+  return (await res.json()) as T;
+}
+
+/**
+ * A call whose success is the status code.
+ *
+ * An accepted request with an empty body is not a JSON document, and parsing it as one turns a
+ * request that worked into an error the user is shown.
+ */
+async function accepted(path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${base}${path}`, {
+    method: 'POST',
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+  }
+}
+
+export async function listProposals(): Promise<ProposalSummary[]> {
+  const body = await json<{ proposals: ProposalSummary[] }>('/proposals');
+  return body.proposals;
+}
+
+export function reviewProposal(id: string): Promise<ProposalReview> {
+  return json(`/proposals/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Approves against the exact content the reviewer saw.
+ *
+ * `contentHash` is not optional and is not read back from the server here. An approval that does not
+ * say what it approved cannot be checked against what is there now, which is the whole mechanism.
+ */
+export function approveProposal(
+  id: string,
+  contentHash: string,
+  typed?: string,
+): Promise<unknown> {
+  return json(`/proposals/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ content_hash: contentHash, typed: typed ?? null }),
+  });
+}
+
+export function rejectProposal(id: string): Promise<void> {
+  return accepted(`/proposals/${encodeURIComponent(id)}/reject`, { method: 'POST' });
+}
+
+/** What one task changed, from its own starting commit rather than from the run base. */
+export function taskDiff(runId: string, taskId: string): Promise<ChangeSet> {
+  return json(
+    `/runs/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/diff`,
+  );
+}
+
+/** What the whole run would add to the branch. */
+export function candidateDiff(runId: string): Promise<ChangeSet> {
+  return json(`/runs/${encodeURIComponent(runId)}/candidate/diff`);
+}
+
+export function listAgents(): Promise<AgentSummary[]> {
+  return json('/agents');
+}
+
+export function listSessions(): Promise<SessionSummary[]> {
+  return json('/sessions');
+}
+
+export function createSession(agentId: string, projectRoot: string): Promise<SessionSummary> {
+  return json('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ agent_id: agentId, project_root: projectRoot }),
+  });
+}
+
+export function sendPrompt(
+  sessionId: string,
+  text: string,
+  mentions: string[] = [],
+): Promise<void> {
+  return json(`/sessions/${encodeURIComponent(sessionId)}/prompt`, {
+    method: 'POST',
+    body: JSON.stringify({ text, mentions }),
+  });
+}
+
+/**
+ * Files under the session's project root, for `@` completion.
+ *
+ * Scoped to a session rather than taking a directory, so the daemon never becomes a general
+ * filesystem browser for whatever can reach the port.
+ */
+export function sessionPaths(sessionId: string, q: string): Promise<PathEntry[]> {
+  const query = new URLSearchParams({ q });
+  return json(`/sessions/${encodeURIComponent(sessionId)}/paths?${query}`);
+}
+
+export function cancelTurn(sessionId: string): Promise<void> {
+  return json(`/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST' });
+}
+
+export function answerPermission(
+  sessionId: string,
+  requestId: string,
+  optionId: string | null,
+): Promise<void> {
+  return json(`/sessions/${encodeURIComponent(sessionId)}/permission`, {
+    method: 'POST',
+    body: JSON.stringify({ request_id: requestId, option_id: optionId }),
+  });
+}
+
+export function setConfigOption(
+  sessionId: string,
+  optionId: string,
+  value: string | boolean,
+): Promise<{ applied: boolean; requires_new_session: boolean }> {
+  return json(`/sessions/${encodeURIComponent(sessionId)}/config`, {
+    method: 'POST',
+    body: JSON.stringify({ option_id: optionId, value }),
+  });
+}
+
+export async function listRuns(): Promise<RunSummary[]> {
+  const body = await json<{ runs: RunSummary[] }>('/runs');
+  return body.runs;
+}
+
+/**
+ * Starts a run.
+ *
+ * Answers with an id and nothing else: the run is accepted, not finished, and the planner has
+ * not drafted anything yet. Everything a screen wants to show arrives on the run's event
+ * stream, so a fuller response here would only be state that can already be stale.
+ */
+export function createRun(goal: string, projectRoot: string): Promise<{ id: string }> {
+  return json('/runs', {
+    method: 'POST',
+    body: JSON.stringify({ goal, project_root: projectRoot }),
+  });
+}
+
+/**
+ * Combines the candidate into the project.
+ *
+ * A separate call rather than something the orchestrator does when acceptance passes. Passing
+ * the assertions a task named is not evidence that the change is the one that was asked for,
+ * and the gate exists so that judgement happens once, here, with a name attached to it.
+ */
+export function mergeRun(runId: string): Promise<{ commit: string }> {
+  return json(`/runs/${encodeURIComponent(runId)}/merge`, { method: 'POST' });
+}
+
+/** Throws the candidate away. The task branches stay, so the work is recoverable by hand. */
+export function abandonRun(runId: string): Promise<void> {
+  return accepted(`/runs/${encodeURIComponent(runId)}/abandon`);
+}
+
+export function cancelRun(runId: string): Promise<void> {
+  return accepted(`/runs/${encodeURIComponent(runId)}/cancel`);
+}
+
+export function fetchTerminalOutput(
+  terminalId: string,
+): Promise<{ output: string; truncated: boolean }> {
+  return json(`/terminals/${encodeURIComponent(terminalId)}`);
+}
+
+export function listRules(projectRoot: string | null): Promise<Rule[]> {
+  const q = projectRoot ? `?project_root=${encodeURIComponent(projectRoot)}` : '';
+  return json(`/rules${q}`);
+}
+
+export function saveRule(rule: {
+  scope: 'global' | 'project';
+  project_root: string | null;
+  body: string;
+}): Promise<Rule> {
+  return json('/rules', { method: 'POST', body: JSON.stringify(rule) });
+}
+
+export function deleteRule(id: string): Promise<void> {
+  return json(`/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** One ACP frame as the daemon kept it, which may be the front of a longer one. */
+export interface RawFrame {
+  /** Monotonic within a daemon run. Used to ask only for what has not been seen. */
+  seq: number;
+  at_ms: number;
+  direction: string;
+  agent_id: string;
+  line: string;
+  /** Bytes dropped from the end. An attached file makes a prompt frame far longer than a screen. */
+  clipped_bytes: number | null;
+  malformed: boolean;
+}
+
+/** Raw ACP frames, for the message inspector. */
+export function fetchRawFrames(limit = 500): Promise<RawFrame[]> {
+  return json(`/raw?limit=${limit}`);
+}
+
+/** Everything after `since`. Empty when nothing has arrived, which is the common case. */
+export function fetchRawFramesSince(since: number): Promise<RawFrame[]> {
+  return json(`/raw?since=${since}`);
+}
