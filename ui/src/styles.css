@@ -2119,3 +2119,86 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* The input on the start screen.
+   The first thing on the page, because saying what you want is the first thing anybody wants to do
+   here — and it opens the session itself, so nothing has to be arranged before typing. */
+.start-composer {
+  margin: 0 0 var(--space-32);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-large);
+  background: var(--bg-muted);
+  overflow: hidden;
+}
+
+.start-composer textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-16);
+  border: none;
+  background: transparent;
+  resize: vertical;
+  font-family: var(--font-serif);
+  font-size: var(--chat-font-size-l);
+  line-height: var(--prose-line-height);
+  color: var(--fg-default);
+}
+
+.start-composer textarea:focus {
+  outline: none;
+}
+
+.start-composer-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border-top: var(--border-thin) solid var(--border-muted);
+  font-family: var(--font-sans);
+}
+
+.start-composer-foot select,
+.start-composer-foot input {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-8);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-default);
+  color: var(--fg-default);
+}
+
+/* The directory takes the room, because a path is the long value on this row. */
+.start-composer-foot input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--chat-font-size-xs);
+}
+
+.start-composer-foot button {
+  font: inherit;
+  font-size: var(--chat-font-size-s);
+  padding: var(--space-4) var(--space-16);
+  border: none;
+  border-radius: var(--radius-medium);
+  background: var(--bg-accent-emphasis);
+  color: var(--fg-on-emphasis);
+  cursor: pointer;
+}
+
+.start-composer-foot button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.start-here-blocked {
+  margin: 0 0 var(--space-32);
+  padding: var(--space-16);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-medium);
+  background: var(--bg-muted);
+  font-size: var(--chat-font-size-s);
+  color: var(--fg-muted);
+}

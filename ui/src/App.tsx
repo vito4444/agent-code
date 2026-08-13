@@ -6,6 +6,7 @@ import { RawInspector } from './components/inspector/RawInspector';
 import { RunList, StartRun } from './components/run/RunList';
 import { RunView } from './components/run/RunView';
 import { SessionList, asWorker } from './components/sidebar/SessionList';
+import { StartHere } from './components/chat/StartHere';
 import * as api from './lib/api';
 import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
@@ -30,47 +31,6 @@ export function workerSessionFor(
     if (taskId === undefined || worker.task === taskId) return s.id;
   }
   return null;
-}
-
-/**
- * What the transcript says before there is one.
- *
- * "No session selected." was accurate and useless: it named a state without saying what to do about
- * it, in the largest empty area in the application. The two things worth saying here are the two
- * things this workbench does that a single chat window does not, so they are what fills the space.
- */
-function StartHere({ hasSession, onRuns }: { hasSession: boolean; onRuns: () => void }) {
-  return (
-    <div className="start-here" data-testid="start-here">
-      <h1>Workbench</h1>
-      {hasSession ? (
-        <p>Describe what you want done. The reasoning, every tool call and every file touched will
-          appear here as it happens.</p>
-      ) : (
-        <p>Open a session from the sidebar to talk to one agent, or start a run to have a goal
-          broken into tasks and worked on in parallel.</p>
-      )}
-      <div className="start-here-cards">
-        <article>
-          <h2>One agent, one conversation</h2>
-          <p>
-            Streaming reasoning you can collapse, tool calls with the diff inside them, and every
-            file read or written on the agent's behalf — including the ones it was refused.
-          </p>
-        </article>
-        <article>
-          <h2>A goal, planned and split</h2>
-          <p>
-            One sentence becomes a task graph. Each task gets its own worktree, its own acceptance
-            check, and nothing merges until you say so.
-          </p>
-          <button type="button" onClick={onRuns} data-testid="start-here-runs">
-            Go to runs
-          </button>
-        </article>
-      </div>
-    </div>
-  );
 }
 
 export function App() {
@@ -305,8 +265,30 @@ export function App() {
         {screen === 'chat' && (
           <>
             <div className="transcript" data-testid="transcript">
-              {session.turns.length === 0 && (
-                <StartHere hasSession={activeId !== null} onRuns={() => setScreen('runs')} />
+              {session.turns.length === 0 && !activeId && (
+                <StartHere
+                  agents={agents}
+                  onRuns={() => setScreen('runs')}
+                  onStart={(agentId, root, text) => {
+                    api
+                      .createSession(agentId, root)
+                      .then((created) => {
+                        useStore.getState().setSessionList([...store.sessionList, created]);
+                        useStore.getState().setActiveSession(created.id);
+                        useStore.getState().setBusy(created.id, true);
+                        return api.sendPrompt(created.id, text);
+                      })
+                      .catch(() => {
+                        // The daemon's own refusal — a directory that is not there, an agent that
+                        // will not launch — comes back through the session list on its next load.
+                        // Swallowing it here keeps a bad path from taking the interface down with
+                        // it.
+                      });
+                  }}
+                />
+              )}
+              {session.turns.length === 0 && activeId && (
+                <div className="empty">Nothing yet. Describe what you want done.</div>
               )}
               {session.turns.map((turn) => (
                 <Turn key={turn.turn} turn={turn} onAnswerPermission={answerPermission} />
@@ -320,10 +302,9 @@ export function App() {
               )}
             </div>
 
-            {/* No session means nothing to send to, and a composer with a Send button that cannot
-                send is an affordance for something impossible. The empty state above already says
-                what to do instead, so this is absent rather than disabled: a disabled control still
-                asks the reader to work out why. */}
+            {/* With no session open the start screen carries its own input, which opens a session
+                and sends the first turn in one act. Two composers on one screen would be two answers
+                to "where do I type", so this one waits until there is a conversation to add to. */}
             {activeId && (
             <Composer
               agentName={summary?.agent_display_name ?? 'no agent'}

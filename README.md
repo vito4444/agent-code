@@ -61,7 +61,7 @@ cd ui && pnpm dev     # proxies /api, WebSocket included
 
 ```bash
 cargo test --workspace       # 280 tests
-cd ui && pnpm vitest run         # 105 tests
+cd ui && pnpm vitest run         # 111 tests
 ./scripts/m0-mergetree.sh    # 15 assertions about git's own behaviour
 ./scripts/e2e-smoke.sh       # 51 assertions, the conversation slice
 ./scripts/e2e-orchestration.sh # 50 assertions, one run start to finish

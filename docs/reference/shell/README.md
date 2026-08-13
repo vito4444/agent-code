@@ -35,7 +35,16 @@ and it says why in words — "a symlink led outside the workspace" rather than `
 The stored value stays the identifier so logs and tests can match on it; the sentence is for the
 person being told their agent was stopped.
 
-`paper-empty.png` is the same shell with no session open, which is the state that shows the
+`paper-empty.png` is the shell with no session open, and its input is the point of it. The screen
+went through two wrong answers first. It said "No session selected.", which is accurate and useless —
+it names a state without saying what to do about it, in the largest empty area in the application.
+Then the composer was hidden here, on the grounds that a Send button with nothing to send to is an
+affordance for something impossible, which treated "the button cannot work" as the only option when
+the better answer was to make it work. Typing here opens a session and sends the message as its first
+turn, so one intention takes one act instead of three — find the sidebar, open a session, and only
+then say what you wanted, the first two of which are about our object model rather than the work.
+
+The same screen with a session open, which is the state that shows the
 autonomy selector sitting above the input box rather than in the row with the per-moment controls.
 
 `run-view.png` is one orchestrated run, and it is the densest of these. Four things in it are the
