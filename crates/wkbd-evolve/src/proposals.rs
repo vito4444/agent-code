@@ -374,6 +374,15 @@ pub enum Created {
     /// The budget was already spent. Recorded for the audit trail, never shown, never
     /// applied.
     OverBudget { proposal: Proposal, spent: u32 },
+    /// This exact proposal already exists, and nothing new was written.
+    ///
+    /// Which matters most for the things that are raised repeatedly by construction. A
+    /// distiller reads the whole history after every run, so the procedure it found last week
+    /// is found again every week — and a queue that regrows the same rows after each run stops
+    /// being read, which is how an approval gate stops being one. Worse, re-raising something
+    /// already rejected asks a person to say no twice to the same suggestion, which reads as
+    /// the system not listening.
+    AlreadyDecided(Proposal),
 }
 
 impl Created {
@@ -381,7 +390,13 @@ impl Created {
         match self {
             Created::Queued(p) => p,
             Created::OverBudget { proposal, .. } => proposal,
+            Created::AlreadyDecided(p) => p,
         }
+    }
+
+    /// True when this call put something new in front of a person.
+    pub fn is_new(&self) -> bool {
+        matches!(self, Created::Queued(_))
     }
 }
 
@@ -405,6 +420,22 @@ pub async fn create(store: &Store, new: NewProposal, budget: &ApprovalBudget) ->
     let scope = new.payload.scope().to_string();
     let body = serde_json::to_string(&new.payload)?;
     let content_hash = proposal_hash(kind, &scope, &body);
+
+    // Identity is the content hash, so the same suggestion arriving twice is one decision.
+    //
+    // Not every prior status blocks a new one, and the line is whether a person ever weighed it.
+    // Pending, approved, applied and rejected all mean the question has been put, so putting it
+    // again is noise at best and pestering at worst. Expired, voided and superseded mean it was
+    // disposed of by policy or by an accident of timing without anybody judging its merits, so a
+    // later occasion deserves its own row.
+    if let Some(existing) = decided_with_hash(store, &content_hash).await? {
+        tracing::debug!(
+            kind = kind.as_str(),
+            status = existing.status.as_str(),
+            "a proposal with these contents already exists"
+        );
+        return Ok(Created::AlreadyDecided(existing));
+    }
 
     let mut risk = new.risk.max(new.payload.minimum_risk());
     // Text that renders differently for the reviewer than it reads for the machine is
@@ -539,6 +570,31 @@ pub async fn pending(store: &Store) -> Result<Vec<Proposal>> {
                 out.push(r??);
             }
             Ok(out)
+        })
+        .await
+}
+
+/// An existing proposal with these contents that somebody has already been asked about.
+///
+/// Ordered oldest first, so the answer is the original decision rather than whichever duplicate
+/// happens to sort last.
+async fn decided_with_hash(store: &Store, content_hash: &str) -> Result<Option<Proposal>> {
+    let hash = content_hash.to_string();
+    store
+        .read(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, kind, scope, body, content_hash, evidence, status, risk,
+                        created_ms, decided_ms, approved_hash
+                 FROM proposals
+                 WHERE content_hash = ?1
+                   AND status IN ('pending', 'approved', 'applied', 'rejected')
+                 ORDER BY created_ms, id LIMIT 1",
+            )?;
+            let mut rows = stmt.query_map([&hash], row_to_proposal)?;
+            match rows.next() {
+                Some(r) => Ok(Some(r??)),
+                None => Ok(None),
+            }
         })
         .await
 }
@@ -868,6 +924,114 @@ mod tests {
             Created::Queued(p) => p,
             other => panic!("expected a queued proposal, got {other:?}"),
         }
+    }
+
+    /// The queue has to survive something that raises the same suggestion on a schedule.
+    ///
+    /// Distillation reads the whole history after every run, so a procedure found once is found
+    /// again every time. Without this the queue regrows the same rows after each run and stops
+    /// being read, which is how an approval gate stops being one.
+    #[tokio::test]
+    async fn the_same_proposal_is_not_queued_twice() {
+        let (_dir, store) = store().await;
+        let first = queued(&store, playbook_payload("prefer merge-tree")).await;
+
+        let again = create(
+            &store,
+            NewProposal::new(playbook_payload("prefer merge-tree"), evidence()),
+            &ApprovalBudget::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(!again.is_new());
+        assert_eq!(again.proposal().id, first.id, "the original row is what comes back");
+        assert_eq!(pending(&store).await.unwrap().len(), 1);
+    }
+
+    /// Re-raising something a person rejected asks them to say no twice, which reads as the
+    /// system not listening — and the second no is the one they stop giving.
+    #[tokio::test]
+    async fn a_rejected_proposal_does_not_come_back() {
+        let (_dir, store) = store().await;
+        let first = queued(&store, playbook_payload("rewrite the playbook each run")).await;
+        reject(&store, &first.id).await.unwrap();
+
+        let again = create(
+            &store,
+            NewProposal::new(
+                playbook_payload("rewrite the playbook each run"),
+                evidence(),
+            ),
+            &ApprovalBudget::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(again, Created::AlreadyDecided(_)));
+        assert_eq!(again.proposal().status, Status::Rejected);
+        assert!(pending(&store).await.unwrap().is_empty());
+    }
+
+    /// The other direction, and the reason the check names statuses rather than "any row".
+    ///
+    /// The two over-budget policies differ in exactly this, and it is why both exist.
+    /// `RejectByDefault` means what its comment says — "the system does not get its way by
+    /// asking again" — so a suggestion that arrived on a full day is spent. `Expire` records
+    /// that nobody judged it, and a later day gets to ask.
+    #[tokio::test]
+    async fn whether_a_full_day_is_final_is_the_budget_policy_s_choice() {
+        for (policy, comes_back) in
+            [(OverBudget::RejectByDefault, false), (OverBudget::Expire, true)]
+        {
+            let (_dir, store) = store().await;
+            let full = ApprovalBudget { per_day: 0, over_budget: policy };
+
+            let first = create(
+                &store,
+                NewProposal::new(playbook_payload("lock the test files"), evidence()),
+                &full,
+            )
+            .await
+            .unwrap();
+            assert!(matches!(first, Created::OverBudget { .. }));
+
+            let tomorrow = create(
+                &store,
+                NewProposal::new(playbook_payload("lock the test files"), evidence()),
+                &ApprovalBudget::default(),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(tomorrow.is_new(), comes_back, "policy {policy:?}");
+            assert_eq!(pending(&store).await.unwrap().len(), usize::from(comes_back));
+        }
+    }
+
+    /// Identity is kind, scope and body together, so the same sentence for another project is
+    /// a different decision.
+    #[tokio::test]
+    async fn the_same_text_in_another_scope_is_its_own_proposal() {
+        let (_dir, store) = store().await;
+        queued(&store, playbook_payload("prefer merge-tree")).await;
+
+        let elsewhere = create(
+            &store,
+            NewProposal::new(
+                ProposalPayload::Playbook {
+                    scope: "/other".into(),
+                    deltas: vec![PlaybookDelta::add("prefer merge-tree", SourceTrust::Internal)],
+                },
+                evidence(),
+            ),
+            &ApprovalBudget::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(elsewhere.is_new());
+        assert_eq!(pending(&store).await.unwrap().len(), 2);
     }
 
     fn refusal(error: anyhow::Error) -> Refusal {

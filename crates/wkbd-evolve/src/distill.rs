@@ -31,7 +31,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use wkbd_store::Store;
 
 use crate::proposals::{
@@ -39,6 +39,9 @@ use crate::proposals::{
 };
 
 /// How many independent verified successes a procedure needs.
+///
+/// Independent is the load-bearing word, and it is counted in distinct
+/// [`RunSummary::occasion`]s rather than in observations.
 pub const DEFAULT_MIN_OCCURRENCES: usize = 3;
 
 /// Something that happened at the end of a run, and who says so.
@@ -83,7 +86,18 @@ impl Signal {
 /// What a finished run looked like, reduced to the parts distillation can use.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunSummary {
+    /// What the evidence cites. Free-form, and finer-grained than [`Self::occasion`] where the
+    /// caller has something more precise to point a reviewer at.
     pub run_id: String,
+    /// The independent occasion this observation belongs to.
+    ///
+    /// Two observations that share one count once toward the repetition gate, and this is the
+    /// distinction the gate rests on. An orchestrated run splits a goal into tasks that often
+    /// resemble each other, so three sibling tasks succeeding the same way is one planner making
+    /// one decision that worked — not three occasions on which a procedure proved itself. Counting
+    /// them as three would let a single run write a procedure into the playbook, which is the
+    /// coincidence this module exists to refuse.
+    pub occasion: String,
     /// Project root, and the scope any resulting bullet would live in.
     pub scope: String,
     /// A coarse class of task. Two runs are only ever compared within one class.
@@ -196,11 +210,16 @@ pub fn distill_with(
             continue;
         }
         let verified: Vec<&&RunSummary> = group.iter().filter(|r| r.verified()).collect();
-        if verified.len() < policy.min_occurrences {
-            continue;
-        }
         // Only runs whose success something outside the model attested to are cited.
         if verified.len() != group.len() {
+            continue;
+        }
+        // Distinct occasions, not observations. Three tasks in one run that all worked are one
+        // occasion on which this shape of work succeeded, and treating them as three would let a
+        // single run promote a coincidence into a procedure.
+        let occasions: BTreeSet<&str> =
+            verified.iter().map(|r| r.occasion.as_str()).collect();
+        if occasions.len() < policy.min_occurrences {
             continue;
         }
 
@@ -286,6 +305,7 @@ mod tests {
     fn run(id: &str, signals: Vec<Signal>) -> RunSummary {
         RunSummary {
             run_id: id.into(),
+            occasion: id.into(),
             scope: SCOPE.into(),
             goal_kind: "add a crate-level test".into(),
             steps: steps(),
@@ -300,6 +320,44 @@ mod tests {
                 command: "cargo test -p wkbd-store".into(),
             }],
         )
+    }
+
+    /// The gate counts occasions, and a run is the occasion.
+    ///
+    /// An orchestrated run splits one goal into tasks that resemble each other by construction —
+    /// three sibling tasks that all edited Rust and all passed `cargo test` are one planner
+    /// getting one decision right. Counting them as three lets a single run write a procedure,
+    /// which is the coincidence this module exists to refuse.
+    #[test]
+    fn siblings_from_one_run_are_one_occasion() {
+        let policy = DistillPolicy::default();
+
+        let one_run: Vec<RunSummary> = ["task-a", "task-b", "task-c"]
+            .iter()
+            .map(|task| {
+                let mut r = verified(&format!("run-1/{task}"));
+                r.occasion = "run-1".into();
+                r
+            })
+            .collect();
+        assert!(
+            distill(&one_run, &policy).is_empty(),
+            "three tasks in one run are one occasion"
+        );
+
+        // The same three shapes across three runs is the thing the gate is for.
+        let three_runs: Vec<RunSummary> = ["run-1", "run-2", "run-3"]
+            .iter()
+            .map(|run| {
+                let mut r = verified(&format!("{run}/task-a"));
+                r.occasion = (*run).into();
+                r
+            })
+            .collect();
+        let candidates = distill(&three_runs, &policy);
+        assert_eq!(candidates.len(), 1);
+        // Every observation is still cited, because a reviewer wants to see all of them.
+        assert_eq!(candidates[0].supporting_runs.len(), 3);
     }
 
     #[test]

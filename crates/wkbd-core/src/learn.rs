@@ -18,6 +18,7 @@
 //! automatic would put an attacker's text in the next session's instructions.
 
 use anyhow::Result;
+use wkbd_evolve::distill::DistillPolicy;
 use wkbd_evolve::proposals::{self, ApprovalBudget, Evidence, NewProposal, ProposalPayload};
 
 use wkbd_proto::{EventPayload, RunEvent};
@@ -34,6 +35,48 @@ pub async fn from_run(store: &Store, run_id: &str, project_root: &str) {
     if let Err(e) = propose_from_outcome(store, run_id, project_root).await {
         tracing::warn!(run = %run_id, error = %e, "could not raise proposals from a run");
     }
+    if let Err(e) = distil_procedures(store, project_root).await {
+        tracing::warn!(project = %project_root, error = %e, "could not distil procedures");
+    }
+}
+
+/// Looks for a procedure in everything this project has finished, not just in this run.
+///
+/// Which is why it takes no run id. A procedure is by definition something that happened more than
+/// once, so the unit of evidence is the project's history and this run is one more data point in
+/// it. Running the whole search after every run rather than accumulating state means there is no
+/// index to fall out of date, and the re-derivation is cheap enough at the scale a local workbench
+/// reaches.
+///
+/// Re-deriving does mean the same procedure is found again after every subsequent run. It is
+/// filed once: [`proposals::create`] treats the content hash as the identity of a decision, so the
+/// second finding returns the first row instead of growing the queue.
+async fn distil_procedures(store: &Store, project_root: &str) -> Result<()> {
+    let traces = crate::trace::traces_for_project(store, project_root).await?;
+    if traces.is_empty() {
+        return Ok(());
+    }
+
+    let candidates = wkbd_evolve::distill::distill(&traces, &DistillPolicy::default());
+    if candidates.is_empty() {
+        tracing::debug!(
+            project = %project_root,
+            traces = traces.len(),
+            "nothing repeated often enough to distil"
+        );
+        return Ok(());
+    }
+
+    let created =
+        wkbd_evolve::distill::propose(store, candidates, &ApprovalBudget::default()).await?;
+    let fresh = created.iter().filter(|c| c.is_new()).count();
+    tracing::info!(
+        project = %project_root,
+        found = created.len(),
+        queued = fresh,
+        "distilled procedures from repeated verified success"
+    );
+    Ok(())
 }
 
 /// Facts from the run's own events and from every session that took part in it.

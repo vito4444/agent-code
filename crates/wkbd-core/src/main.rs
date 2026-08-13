@@ -20,6 +20,7 @@ mod planner;
 mod route;
 mod run;
 mod runner;
+mod trace;
 mod state;
 
 use anyhow::{Context, Result};
