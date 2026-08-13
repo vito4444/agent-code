@@ -642,6 +642,18 @@ nothing appears outside it.
   End-anchored scrolling is done — `ui/src/lib/stickToBottom.ts` — and a virtualized list has to
   cooperate with it rather than replace it: it follows growth through a `MutationObserver`, which
   a windowing implementation would have to keep firing.
+- **The playbook is injected, which for most of this project's life it was not.** Nothing outside
+  `wkbd-evolve` read it: bullets were proposed, approved, applied, stored and consulted by no
+  session, so two of the three learning loops ended in a table nobody read. It is the middle band
+  of the prelude now — instructions somebody wrote, then observations somebody approved, then
+  inferences nobody has seen — and `wkbd-memory` reaches into `wkbd-evolve` for it so that the
+  ordering lives in one place. An ordering enforced in two will eventually differ between them.
+- **A session's working directory and its memory scope are separate arguments.** They coincide for
+  a conversation somebody started; they do not for an orchestrated worker, which works in a
+  worktree that did not exist ten seconds earlier. Scoped there it matched no project rules, no
+  facts and no notes — the exact "one entry point where the setting silently stopped applying"
+  failure the brief warned about. `AppState::open_session` takes both, so the compiler makes the
+  decision explicit at each of the three call sites.
 - **Proposals are identified by their content hash, and a decided one does not come back.** Which
   the distiller forced: it reads the whole history after every run, so what it found last week it
   finds again every week. Pending, approved, applied and rejected all block a new row; expired,
