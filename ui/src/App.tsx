@@ -14,6 +14,7 @@ import { ReviewSurface } from './components/review/ReviewSurface';
 import * as api from './lib/api';
 import { contextPercent, emptySession, runList, useStore } from './lib/store';
 import { EventStream, defaultStreamUrl } from './lib/ws';
+import { useStickToBottom } from './lib/stickToBottom';
 
 type Screen = 'chat' | 'rules' | 'inspector' | 'runs' | 'proposals' | 'settings';
 
@@ -134,6 +135,9 @@ export function App() {
   const summary = store.sessionList.find((s) => s.id === activeId);
 
   const percent = useMemo(() => contextPercent(session), [session]);
+  // Keyed on the session, so opening a different conversation starts at its newest turn rather
+  // than at whatever offset the previous one was left at.
+  const transcript = useStickToBottom(activeId);
 
   const runs = useMemo(() => runList(store.runs), [store.runs]);
   const activeRun = activeRunId ? (store.runs[activeRunId] ?? null) : null;
@@ -317,7 +321,12 @@ export function App() {
 
         {screen === 'chat' && (
           <>
-            <div className="transcript" data-testid="transcript">
+            <div
+              className="transcript"
+              data-testid="transcript"
+              ref={transcript.ref}
+              onScroll={transcript.onScroll}
+            >
               {session.turns.length === 0 && !activeId && (
                 <StartHere
                   agents={agents}
@@ -354,6 +363,17 @@ export function App() {
                 </div>
               )}
             </div>
+
+            {!transcript.stuck && (
+              <button
+                type="button"
+                className="jump-latest"
+                onClick={transcript.jump}
+                data-testid="jump-latest"
+              >
+                Jump to latest
+              </button>
+            )}
 
             {/* Between the transcript and the composer, and outside the scrolling record.
                 Outside because a plan is replaced wholesale on every update — it is current state

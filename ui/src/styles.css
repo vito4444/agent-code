@@ -147,6 +147,28 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--space-24) 0 var(--space-16);
+  /* Anchors growth to the bottom, so a chunk arriving does not shift what is under the cursor
+     while the browser catches up with the scroll assignment. */
+  overflow-anchor: auto;
+}
+
+/* Only present while the record is detached, which is the only time it means anything. A
+   permanent button here would be a permanent claim that you are missing something. */
+.jump-latest {
+  align-self: center;
+  margin: calc(-1 * var(--space-16)) 0 var(--space-4);
+  padding: var(--space-4) var(--space-12);
+  border: var(--border-thin) solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-default);
+  color: var(--fg-muted);
+  font-size: var(--chat-font-size-xs);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+}
+
+.jump-latest:hover {
+  color: var(--fg-default);
 }
 
 .empty {

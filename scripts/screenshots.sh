@@ -223,6 +223,37 @@ sleep 6
 raise
 shot paper-transcript
 
+# ---------------------------------------------------------------- attaching a file
+#
+# Two captures, because the two halves fail differently. The picker is a live control and the only
+# way to know it renders where the caret is, is to type into it; the strip is what the transcript
+# keeps afterwards, and it is the part that says whether the agent got the file or only its name.
+#
+# The composer is the bottom of the window. Measuring it the way the row finder measures lists would
+# mean finding the box's own border among the footer's, so this clicks a point relative to the
+# window's bottom edge instead — the composer is anchored there and nothing below it moves.
+WH=$(DISPLAY="$DISPLAY_NUM" xwininfo -id "$WID" | awk '/Height:/ {print $2}')
+WW=$(DISPLAY="$DISPLAY_NUM" xwininfo -id "$WID" | awk '/Width:/ {print $2}')
+click $((WW / 2)) $((WH - 120)) 1
+DISPLAY="$DISPLAY_NUM" xdotool type --delay 60 'compare @norm'
+sleep 2
+raise
+shot mention-picker
+
+# Clear it and send a real one, so the transcript shows what the agent was given.
+DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers ctrl+a
+DISPLAY="$DISPLAY_NUM" xdotool key --clearmodifiers BackSpace
+api /api/sessions/"$S1"/prompt -X POST -H 'content-type: application/json' \
+    -d '{"text":"explain this normalizer","mentions":["crates/wkbd-proto/src/normalize.rs"]}' > /dev/null
+sleep 4
+REQ=$(python3 "$ROOT/scripts/read-events.py" "$PORT" 0 1.5 2> /dev/null \
+    | jq -r '[.[]|select(.payload.event=="permission_requested")]|last|.payload.request_id // "1"')
+api /api/sessions/"$S1"/permission -X POST -H 'content-type: application/json' \
+    -d "{\"request_id\":\"$REQ\",\"option_id\":\"allow-once\"}" > /dev/null
+sleep 6
+raise
+shot paper-attachment
+
 # ---------------------------------------------------------------- the file boundary
 S2=$(api /api/sessions -X POST -H 'content-type: application/json' \
     -d "{\"agent_id\":\"probe\",\"project_root\":\"$FS\"}" | jq -r .id)
