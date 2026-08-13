@@ -21,6 +21,20 @@ import type { ProposalSummary, ProposalReview } from '../../lib/types';
  * shown, and the daemon compares it against the bytes on disk right now. An edit that lands between
  * rendering this and pressing the button invalidates the press instead of being carried along by it.
  */
+/**
+ * A run reference, short enough to read and complete enough to find.
+ *
+ * Run ids are uuids, so only the first few characters carry any information and the rest is
+ * noise. A distilled procedure cites `<run>/<task>` instead, where the part after the slash is
+ * the only human-readable thing in the string — truncating to eight characters threw it away and
+ * left three citations that all looked identical.
+ */
+function shortenRun(id: string): string {
+  const slash = id.indexOf('/');
+  if (slash === -1) return id.slice(0, 8);
+  return `${id.slice(0, Math.min(slash, 8))}/${id.slice(slash + 1)}`;
+}
+
 export function ProposalQueue() {
   const [items, setItems] = useState<ProposalSummary[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -180,7 +194,7 @@ function ProposalDetail({ id, onDecided }: { id: string; onDecided: () => void }
             {review.evidence.supporting_runs.map((r, i) => (
               <span key={r}>
                 {i > 0 && ', '}
-                <code>{r.slice(0, 8)}</code>
+                <code title={r}>{shortenRun(r)}</code>
               </span>
             ))}
           </p>

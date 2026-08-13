@@ -226,3 +226,47 @@ describe('the approval queue', () => {
     await waitFor(() => expect(screen.queryByTestId('proposal-p1')).toBeNull());
   });
 });
+
+/**
+ * The kind the distiller produces, which nothing reached until the third loop was wired.
+ *
+ * A workflow is the one payload whose value is in its ordering — a reviewer approving "run the
+ * tests then commit" is approving something different from "commit then run the tests" — so the
+ * steps have to arrive numbered and in order rather than as a set.
+ */
+describe('a distilled workflow', () => {
+  it('shows its steps in order and the runs that support it', async () => {
+    const user = userEvent.setup();
+    mocked.listProposals.mockResolvedValue([summary({ id: 'w1', kind: 'workflow' })]);
+    mocked.reviewProposal.mockResolvedValue(
+      review({
+        id: 'w1',
+        kind: 'workflow',
+        changes: [
+          'Remember a workflow called "changes to .md and .rs", with these steps:',
+          '1. write *.rs',
+          '2. write *.md',
+        ],
+        evidence: {
+          supporting_runs: ['run-1/only', 'run-2/only', 'run-3/only'],
+          verified_signals: ['sh tests/check.sh passed'],
+          note: 'the same 2 steps succeeded 3 times with an external success signal each time',
+        },
+      }),
+    );
+
+    render(<ProposalQueue />);
+    await waitFor(() => expect(screen.getByTestId('proposal-w1')).toBeTruthy());
+    await user.click(screen.getByTestId('proposal-w1'));
+
+    const changes = await screen.findByTestId('proposal-w1-changes');
+    const text = changes.textContent ?? '';
+    expect(text).toContain('changes to .md and .rs');
+    expect(text.indexOf('1. write *.rs')).toBeLessThan(text.indexOf('2. write *.md'));
+
+    // The evidence is what makes this reviewable rather than an assertion from nowhere.
+    const detail = screen.getByTestId('proposal-detail-w1').textContent ?? '';
+    expect(detail).toContain('run-1/only');
+    expect(detail).toContain('succeeded 3 times');
+  });
+});
