@@ -623,11 +623,25 @@ nothing appears outside it.
   wanted and the only way to decide the second is to read it.
 - **Terminal support.** `terminal/*` is refused. Embedded terminal content reports that rather
   than showing output.
+- **Attachments come from the project tree only.** Typing `@` completes files and directories under
+  the session's project root, and each resolves against what the agent declared it can be handed —
+  contents where `embeddedContext` was advertised, an image or audio block where those were, a
+  resource link otherwise, with the reason recorded when it degrades. What is *not* there is
+  anything from outside that tree: pasting a screenshot off the clipboard, dragging a file in from
+  the desktop, or fetching a URL. All three mean bytes arriving that no path guard has ruled on,
+  which needs a decision about where they land before it needs an interface. Zed's mention system
+  also covers symbols and diagnostics; both need a language server, and there is not one here.
+- **No quota display.** A reference interface shows "usage limits 73%, resets in 2 hr 21 min". The
+  protocol carries context occupancy and an optional cost figure, and has no concept of a quota or a
+  reset. The per-turn line shows elapsed time and, when the agent reported usage on both sides of a
+  turn, the difference. The first turn of a session therefore shows only a duration.
 - **Windows.** Interfaces are in place (`wkbd-sec::reaper` has the Job Object slot) and return
   unimplemented.
 - **A virtualized transcript.** Collapsing by default keeps the node count manageable at
-  reachable lengths. Virtualization has to be designed together with end-anchored scrolling and
-  the sticky prompt header.
+  reachable lengths. Virtualization has to be designed together with the sticky prompt header.
+  End-anchored scrolling is done — `ui/src/lib/stickToBottom.ts` — and a virtualized list has to
+  cooperate with it rather than replace it: it follows growth through a `MutationObserver`, which
+  a windowing implementation would have to keep firing.
 - ~~**The approval queue has no interface.**~~ It has one, and the loop is closed end to end: a run
   raises a proposal with its evidence, the queue shows it, approving it applies it, and the playbook
   gains the bullet. Verified in the desktop shell as well as in the suite.

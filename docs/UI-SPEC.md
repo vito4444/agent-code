@@ -198,12 +198,49 @@ Top to bottom:
 1. **Autonomy row**, above the input. Answers "under what conditions do my messages go out" — a
    standing policy.
 2. **Queued messages**, if any.
-3. **Text area.**
-4. **Footer row**, inside the input's border.
+3. **Attachment strip**, if any.
+4. **Text area**, with the `@` completion list floating above it when one is open.
+5. **Footer row**, inside the input's border.
 
 The autonomy setting is kept out of the footer deliberately. The footer is right-now state;
 autonomy is a policy that persists across turns. On one line they look like the same kind of
 thing and the row becomes cramped.
+
+#### Mentions
+
+`@` at the start of a word opens a list of files and directories under the session's project root,
+filtered by the repository's own ignore rules. Picking one inserts `@path` as ordinary text.
+
+**Plain text in a plain `<textarea>`, not inline chips.** Chips need `contenteditable`, and
+`contenteditable` with an input method editor duplicates characters, loses candidates and moves the
+caret on commit, with per-browser workarounds. A prompt is where people write prose in their own
+language. Related, and load-bearing for the same reason: every key handler in this box returns
+early on `nativeEvent.isComposing`, because Enter during composition means "accept this candidate"
+and not "send".
+
+**The strip says what the agent will receive, not what was picked.** Text and resource links are
+the protocol's baseline; embedded contents, images and audio each require a capability declared at
+`initialize`. So the same file becomes a different block for a different agent, and the strip says
+which — "contents", "image", or "path only, the agent reads it itself". The transcript keeps the
+same fact after the fact, with the reason when it degraded.
+
+Predicting it in the composer and recording it in the transcript are both worth having, and they
+answer at different moments: the prediction is useful while the user can still paste the relevant
+part instead, and the record is what explains an answer that turns out to be about a file the agent
+never opened.
+
+**The list is the only source of paths.** A hand-typed `@word` that resolves to a file is attached
+too, and one that does not is left alone rather than failing the prompt — "ask @alice about this"
+is not a mistake. A path that came from the list and cannot be read is an error, because the user
+chose a real file.
+
+#### What a turn cost
+
+Under each finished turn, in the muted style: elapsed time, and the tokens the turn added when the
+agent reported usage before and after it. Both parts are measurements. Duration is ours; the token
+figure is the difference between two readings the agent gave, which is why a session's first turn
+shows only a duration — there is nothing to subtract from, and reporting the running total would
+attribute the system prompt to the turn.
 
 #### Footer slots
 

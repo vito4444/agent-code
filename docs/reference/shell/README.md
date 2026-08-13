@@ -176,6 +176,71 @@ surface — a dead reference is worse than the truncation it apologises for, bec
 a way to see the whole thing exists. The note now states the fact and stops; the two places that know
 which commits to compare, a task card and the merge gate, reach the surface from there.
 
+## Attaching a file
+
+`paper-attachment.png` is one prompt with two things attached, and the strip under the quote line
+says what became of each: `crates/wkbd-proto/src/normalize.rs — contents sent — 12 kB` beside
+`crates/wkbd-sec — path only, a directory`.
+
+That second half is the part worth having. The protocol makes every agent accept text and resource
+links, and makes embedded contents, images and audio conditional on capabilities declared at
+`initialize`. So the same mention becomes a different block for a different agent: contents for one,
+a path for another. An agent handed a path has to go and open it, which it may lack the tools or the
+inclination to do — and when it does not, the answer is about a file nobody read, which from outside
+is indistinguishable from the model ignoring the request. Zed, which co-designed the protocol, makes
+the same fork and does not surface it. Naming the fallback is cheap and it is the difference between
+a confusing answer and an explained one.
+
+The composer says the same thing one step earlier, while the user can still decide to paste the
+relevant part instead. Both predictions come from the capabilities that session negotiated, so an
+agent that declares nothing shows "path only" on everything and never a control that does nothing.
+
+Mentions are plain `@path` text in an ordinary `<textarea>`, not inline chips. Chips need
+`contenteditable`, and `contenteditable` with an input method editor duplicates characters and drops
+candidates. A prompt is where people write prose in their own language, so the box has to be the one
+IMEs are actually tested against.
+
+Which turned up an older bug in the same box: pressing Enter to confirm a Chinese candidate sent the
+half-composed message, because the keydown handler never checked `isComposing`.
+
+`paper-attachment.png` is also scrolled up, which is why the "Jump to latest" pill is in it.
+
+## What a turn cost
+
+Under each finished turn: `5.8s`, and the tokens it added when the agent reported usage on both
+sides of it. The reference for this is a task panel reading `9s · 1.1k tokens`.
+
+Tokens are a subtraction, not a reading. An agent reports the total context in use, so attributing
+that to one turn means differencing the value before and after — which is why the first turn of a
+session shows only a duration. There was no reading before it, and the alternative is to report the
+running total as though the turn caused all of it. The context ring in the composer already shows
+occupancy; this line is about one turn.
+
+`Your usage limits — 73% — resets in 2 hr 21 min`, from the same reference, is not here and cannot
+be. The protocol carries context occupancy and an optional cost, and has no concept of a quota or a
+reset time. Whatever we drew there would be invented.
+
+## Three corrections this round
+
+**`file-boundary.png` was a picture of the wrong conversation, and had been for as long as it
+existed.** The script opened a session over the API and captured immediately, with a comment saying
+the newest session is selected automatically. It is not, and it should not be — the interface
+auto-selects only when nothing is selected, because taking the view away from somebody mid-read
+would be worse. Everything the paragraph above says about that screenshot is true of the current
+one; it was not true of the file it described. The script now finds the newest sidebar row and
+clicks it.
+
+**The transcript scrolled, but nothing ever scrolled it.** Every capture of a turn longer than the
+window showed the prompt and the first two tool calls, with the answer below the fold — the one
+thing a reader is there for. It survived this long because the captures were of short transcripts.
+It follows the newest content now, and lets go the moment the reader scrolls up: a turn streams for
+a minute, and being yanked to the bottom on every chunk while trying to read a diff is the worse of
+the two bugs.
+
+**The fake agent reported the same usage figures on every turn**, so the difference across any turn
+was zero — indistinguishable from an agent that reports nothing, and enough to hide whether the
+per-turn token line worked at all.
+
 ## Two things from the references that were not adopted
 
 **The user's message is still a quote line, not a right-aligned bubble.** Both references bubble it,
@@ -187,3 +252,8 @@ screenshot seemed like the wrong way round, and it is a one-line change if the r
 about each tier. An agent declares a list of model ids over the protocol and nothing else — no tier,
 no description, no price — so grouping them would mean inventing the tiers, and a confident-looking
 grouping that came from nowhere is worse than an honest flat list.
+
+**No suggested prompts on the empty screen.** One reference fills its empty state with starter
+chips. The useful version of that is specific to the project in front of you, which nothing here can
+infer, and the generic version — "fix a bug", "write tests" — is furniture that takes up the space
+where the input should be. The empty screen has an input in it instead.
