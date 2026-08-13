@@ -227,7 +227,7 @@ WORKER="$ROOT/target/debug/fake-acp-agent --profile worker"
     --agent "worker=Worker=$WORKER" \
     --agent "worker-b=Worker B=$WORKER" \
     --agent-cost worker-b=4 \
-    --worker-agent worker \
+    --worker-agent worker --worker-agent worker-b \
     --fixed-plan "$WORK/plan.json" \
     > "$WORK/daemon.log" 2>&1 &
 DAEMON_PID=$!
@@ -402,6 +402,10 @@ check_ge "the arms carry state a later run can start from" 1 \
     "$(count_rows "SELECT count(*) FROM routing_arms")"
 # Which agent ran a task is in the log. A choice nobody can see is a choice nobody can question, and
 # this one is made by a model of past outcomes rather than by the user.
+# Nominated, not inferred. Treating every configured agent as a candidate sent tasks to agents set
+# up for interactive chat, and the run failed for a reason visible only in the sidebar.
+check "only nominated agents were routed to" "true" \
+    "$(jq -r "$RUN | map(select(.event==\"task_state_changed\" and .status==\"dispatched\")) | all(.detail | test(\"worker\"))" "$E")"
 check "the log says which agent each task went to" "true" \
     "$(jq -r "$RUN | map(select(.event==\"task_state_changed\" and .status==\"dispatched\")) | all(.detail != null)" "$E")"
 

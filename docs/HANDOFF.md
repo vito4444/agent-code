@@ -445,6 +445,23 @@ It now compares the two elements to each other.
 `worktrees/<run>/<task>`, and the sidebar truncated the path from the right — which is where the
 distinguishing part is. All three read `/home/me/.local/state/wkbd/worktre…`.
 
+### Found by writing the script that regenerates the screenshots
+
+**Routing treated every configured agent as a candidate worker.** Configuring three agents — one for
+orchestrated work and two for interactive chat — made a run fail, because the bandit sent tasks to two
+agents nobody had nominated for the job. An agent being present is not an agent volunteering.
+`--worker-agent` is repeatable now, the nominated set is the routing arms, and a name that was never
+configured is refused at startup rather than at the first worktree. Found by starting the daemon the
+way the screenshot script needed to, which no test did.
+
+**Clicks derived from a captured coordinate landed a title bar too low.** `xdotool
+getwindowgeometry` reports the window *frame* and `import -window` captures the *client area*, and on
+this window manager those differ by 28 pixels. Every attempt at driving the interface by measuring a
+screenshot and clicking the measurement selected the row below the one measured, which is the source of
+a run of "the click did nothing" confusion earlier in this project — including one thing reported as
+unverified that was simply mis-clicked. `xwininfo` reports the client origin, which is what the capture
+is relative to.
+
 ### Found by using it in the desktop rather than reading about it
 
 **Approving a proposal recorded the approval and never ran it.** `apply` existed, was tested, and had

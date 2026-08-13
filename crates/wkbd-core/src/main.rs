@@ -58,10 +58,18 @@ struct Cli {
     #[arg(long)]
     safe_mode: bool,
 
-    /// Which agent does orchestrated work. Without one, the run endpoints refuse rather than
-    /// accepting a run nothing will execute.
-    #[arg(long)]
-    worker_agent: Option<String>,
+    /// Which agents may do orchestrated work. Repeatable; the first is the fallback.
+    ///
+    /// Nominated rather than inferred. Treating every configured agent as a candidate is what the
+    /// first version did, and it sent tasks to agents set up for interactive chat — the run failed,
+    /// and the reason was only visible in the sidebar, where two workers were named after agents
+    /// nobody had offered for the job. An agent being present is not an agent volunteering.
+    ///
+    /// Naming more than one turns routing on: the bandit picks between them per task and learns from
+    /// the acceptance result. Naming one keeps the router off entirely, since a bandit over one arm
+    /// is arithmetic with a fixed answer.
+    #[arg(long = "worker-agent")]
+    worker_agents: Vec<String>,
 
     /// Which agent drafts task graphs. Defaults to the worker agent.
     #[arg(long)]
@@ -219,7 +227,7 @@ async fn main() -> Result<()> {
 
     // Built after the state because it holds a reference to it: a run opens agent sessions, and
     // those live in the state.
-    if let Some(worker) = &cli.worker_agent {
+    if let Some(worker) = cli.worker_agents.first() {
         let planner: Arc<dyn planner::Planner> = match &cli.fixed_plan {
             Some(path) => {
                 let body = std::fs::read_to_string(path)
@@ -243,12 +251,26 @@ async fn main() -> Result<()> {
             }),
         };
 
-        // Every agent is a candidate worker. Routing turns itself off when there is only one, so
-        // the common single-agent setup pays nothing for this.
-        let agent_ids: Vec<String> = app_state.agents.iter().map(|a| a.id.clone()).collect();
+        // The nominated agents, and only those. Routing turns itself off when one is named, so the
+        // common setup pays nothing for it.
+        //
+        // An agent that was configured for interactive chat has not offered to take orchestrated
+        // work, and giving it some produces a run that fails for a reason visible only in the
+        // sidebar — where the worker rows are named after agents nobody nominated.
+        let unknown: Vec<&String> = cli
+            .worker_agents
+            .iter()
+            .filter(|id| !app_state.agents.iter().any(|a| &&a.id == id))
+            .collect();
+        if !unknown.is_empty() {
+            // Refused at startup rather than at the first run. A misspelled id would otherwise
+            // surface as a run that dies preparing its first worktree.
+            anyhow::bail!("--worker-agent names agents that were not configured: {unknown:?}");
+        }
+
         let costs: std::collections::BTreeMap<String, f64> =
             cli.agent_costs.iter().cloned().collect();
-        let routing = match route::Routing::new(store.clone(), &agent_ids, &costs).await {
+        let routing = match route::Routing::new(store.clone(), &cli.worker_agents, &costs).await {
             Ok(r) => Some(r),
             Err(e) => {
                 // Routing is an optimisation. A router that will not start must not stop runs from
